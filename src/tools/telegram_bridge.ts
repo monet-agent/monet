@@ -45,6 +45,8 @@ function resolveSenderLabel(chatId: number, from?: { id: number; first_name?: st
 export async function pollTelegramInbox(): Promise<number> {
   const token = process.env['TELEGRAM_BOT_TOKEN'];
   if (!token) return 0;
+  // Skip getUpdates polling when webhook is active — they conflict (409).
+  if (process.env['TELEGRAM_WEBHOOK_SECRET']) return 0;
 
   let offset = 0;
   try {
