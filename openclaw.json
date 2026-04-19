@@ -1,0 +1,29 @@
+{
+  "agents": {
+    "defaults": {
+      "sandbox": {
+        "mode": "all",
+        "scope": "session",
+        "backend": "docker",
+        "workspaceAccess": "ro",
+        "docker": {
+          "image": "openclaw-sandbox:bookworm-slim",
+          "network": "none",
+          "readOnlyRoot": true,
+          "tmpfs": ["/tmp", "/var/tmp", "/run"],
+          "user": "1000:1000",
+          "capDrop": ["ALL"]
+        }
+      },
+      "dmPolicy": "pairing",
+      "tools": {
+        "elevated": []
+      }
+    }
+  },
+  "gateway": {
+    "bind": "127.0.0.1:18789",
+    "originAllowlist": ["http://127.0.0.1:18789"],
+    "requirePairing": true
+  }
+}

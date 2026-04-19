@@ -1,0 +1,32 @@
+# fly.toml app configuration file generated for monet-agent on 2026-04-19T01:17:21-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'monet-agent'
+primary_region = 'yyz'
+kill_signal = 'SIGTERM'
+kill_timeout = '30s'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DATA_DIR = '/data'
+  NODE_ENV = 'production'
+
+[processes]
+  app = 'node /app/dist/main.js'
+
+[[mounts]]
+  source = 'agent_data'
+  destination = '/data'
+  initial_size = '10gb'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '1gb'
+
+[[metrics]]
+  port = 9091
+  path = '/metrics'

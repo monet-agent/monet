@@ -1,0 +1,51 @@
+version: '3.9'
+
+services:
+  monet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - agent_data:/data
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+      NODE_ENV: development
+    # Override entrypoint for local dev (skip iptables)
+    entrypoint: []
+    command: >
+      sh -c "
+        mkdir -p /data/memory/daily /data/memory/subagents &&
+        for f in /app/soul_files/*.md; do
+          fname=$$(basename $$f);
+          dest=/data/$$fname;
+          [ ! -f $$dest ] && cp $$f $$dest || true;
+        done;
+        [ ! -f /data/memory/journal.md ] && cp -r /app/soul_files/memory/. /data/memory/ || true;
+        [ ! -f /data/ledger.jsonl ] && touch /data/ledger.jsonl || true;
+        [ ! -f /data/memory/public_log.md ] && echo '# Public Log' > /data/memory/public_log.md || true;
+        su -s /bin/sh monet -c 'node /app/dist/main.js'
+      "
+    restart: unless-stopped
+    user: "0"  # starts as root (entrypoint drops to 1000), needed for chattr
+
+  # One-shot ceremony runner for local dev
+  ceremony:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - agent_data:/data
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+    entrypoint: []
+    command: node /app/scripts/journal_setup.js
+    profiles:
+      - ceremony
+
+volumes:
+  agent_data:
+    driver: local

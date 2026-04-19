@@ -1,0 +1,35 @@
+{
+  "name": "monet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "mon€t — autonomous OpenClaw agent powered by Kimi K2 Thinking",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node src/main.ts",
+    "ceremony": "node scripts/journal_setup.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "postinstall": "node scripts/patch_libsodium.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.600.0",
+    "age-encryption": "^0.1.1",
+    "axios": "^1.7.2",
+    "node-cron": "^3.0.3",
+    "openai": "^4.52.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/node-cron": "^3.0.11",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

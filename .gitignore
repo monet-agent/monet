@@ -1,0 +1,22 @@
+# Secrets — never commit
+.env
+.env.local
+
+# Build output
+dist/
+node_modules/
+coverage/
+
+# Runtime state (lives on the Fly volume, not in git)
+ledger.jsonl
+memory/ledger_state.json
+memory/.journal_pubkey
+memory/.journal_canary
+memory/.journal_seq
+memory/journal.md.age
+memory/.journal.lock
+memory/daily/
+memory/subagents/
+
+# macOS
+.DS_Store
