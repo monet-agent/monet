@@ -341,8 +341,9 @@ Important constraints:
 
     const currentCost = estimateHeartbeatCostUSD();
     if (currentCost >= MAX_HEARTBEAT_COST_USD) {
-      console.warn(`[heartbeat] cost cap reached ($${currentCost.toFixed(5)}), sealing`);
-      void journalAppend(`Cost cap $${MAX_HEARTBEAT_COST_USD} hit at $${currentCost.toFixed(5)}. Sealing — resume next heartbeat.`);
+      console.warn(`[heartbeat] cost cap $${MAX_HEARTBEAT_COST_USD} reached ($${currentCost.toFixed(5)}) — sealing early`);
+      try { await journalAppend(`Cost cap $${MAX_HEARTBEAT_COST_USD} hit at $${currentCost.toFixed(5)}. Sealing — resume next heartbeat.`); } catch { /* best-effort */ }
+      try { await imsgSend('damian_jenny', `⚠️ Cost cap hit ($${currentCost.toFixed(3)} of $${MAX_HEARTBEAT_COST_USD}). Heartbeat sealed early — continuing next tick.`); } catch { /* best-effort */ }
       break;
     }
 

@@ -32,7 +32,13 @@ export async function moltbookRead(
     timeout: 15_000,
   });
 
-  const rawPosts = Array.isArray(resp.data) ? resp.data : (resp.data as Record<string, unknown>)['posts'];
+  const rawPosts: unknown[] = Array.isArray(resp.data) ? resp.data : ((resp.data as Record<string, unknown>)['posts'] as unknown[] ?? []);
+
+  // Skip quarantine overhead when there's nothing to audit.
+  if (rawPosts.length === 0) {
+    return { posts: [], injection_suspected: false };
+  }
+
   const rawContent = JSON.stringify(rawPosts);
 
   const schema = {
