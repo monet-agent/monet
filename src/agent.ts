@@ -79,6 +79,14 @@ export async function callLLM(
   const client = makeClient(useFallback);
   const model = useFallback ? FALLBACK_MODEL : PRIMARY_MODEL;
 
+  // DeepInfra (fallback) doesn't understand Moonshot's `builtin_function`
+  // tool type — it 400s the whole request if we send any. Strip them on
+  // fallback; monet will just have local tools + the $-tools become
+  // no-ops until primary is back.
+  const effectiveTools = useFallback
+    ? tools.filter((t) => (t as unknown as { type?: string }).type !== 'builtin_function')
+    : tools;
+
   try {
     // Streaming is required for Kimi Thinking to work correctly per
     // Moonshot docs — reasoning_content is delivered incrementally and
@@ -86,8 +94,8 @@ export async function callLLM(
     const stream = await client.chat.completions.create({
       model,
       messages,
-      tools: tools.length > 0 ? tools : undefined,
-      tool_choice: tools.length > 0 ? 'auto' : undefined,
+      tools: effectiveTools.length > 0 ? effectiveTools : undefined,
+      tool_choice: effectiveTools.length > 0 ? 'auto' : undefined,
       temperature: 1.0,
       stream: true,
       stream_options: { include_usage: true },
