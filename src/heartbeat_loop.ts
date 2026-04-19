@@ -10,7 +10,7 @@ import { healthcheckPing, healthcheckTools } from './tools/healthcheck.js';
 import { verifyCitation, citationTools } from './tools/verify_citation.js';
 import { quarantineIngest, quarantineTools } from './tools/quarantine.js';
 import { moltbookRead, moltbookPost, moltbookTools } from './tools/moltbook.js';
-import { imsgSend, telegramTools } from './tools/telegram_bridge.js';
+import { imsgSend, pollTelegramInbox, telegramTools } from './tools/telegram_bridge.js';
 import {
   workspaceWrite,
   workspaceRead,
@@ -209,6 +209,14 @@ export async function runHeartbeat(): Promise<void> {
   const startTs = Date.now();
   resetHeartbeatMetrics();
   console.log(`[heartbeat] started at ${new Date().toISOString()}`);
+
+  // ── 0. Pull new Telegram messages into memory/inbox.md ───────────────────
+  try {
+    const pulled = await pollTelegramInbox();
+    if (pulled > 0) console.log(`[heartbeat] pulled ${pulled} new Telegram message(s) into inbox`);
+  } catch (e) {
+    console.warn('[heartbeat] telegram poll failed:', e);
+  }
 
   // ── 1. Validate chains before anything else ──────────────────────────────
   const ledgerValid = validateLedgerChain();
