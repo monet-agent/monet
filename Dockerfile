@@ -6,6 +6,11 @@ COPY scripts/ ./scripts/
 RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
+# Soul docs are needed by scripts/doc_code_drift_check.sh (runs in build).
+COPY SOUL.md IDENTITY.md AGENTS.md USER.md TOOLS.md HEARTBEAT.md \
+     MEMORY.md PLAYBOOK.md LEDGER.md ROSTER.md SECURITY.md CONTACTS.md \
+     DECISIONS.md RELATIONSHIPS.md COMMITMENTS.md README.md CLAUDE.md \
+     DEPLOY.md ./
 RUN npm run build
 
 # ── Runtime image ────────────────────────────────────────────────────────
