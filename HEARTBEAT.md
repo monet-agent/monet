@@ -14,7 +14,7 @@ Do these steps in order. Do not skip. **Reading inbox is not optional — it com
 
 1. **Read core context.** SOUL.md → IDENTITY.md → AGENTS.md → USER.md → TOOLS.md → HEARTBEAT.md (this file) → MEMORY.md.
 2. **Read recent state.** MEMORY.md's recent-days and recent-weeks sections. Last 7 days of LEDGER.md tail. Open entries in DECISIONS.md (status: proposed). Past journal entries are sealed and unreadable — all cross-heartbeat continuity lives in MEMORY.md.
-3. **Read inbox FIRST.** Before any outbound `imsg_send` / `moltbook_post` / `public_log_append` in this heartbeat, you MUST: (a) read `memory/inbox.md` in full, (b) call `poll_telegram_inbox` for unread DMs from Damian and Jenny. If either has anything new, answer it before doing anything else. Sending an outbound message before inbox is read is a protocol violation and will cost -3 points.
+3. **Read inbox NOW — unconditionally.** Do this before step 4, before any tool call, before any decision. Read `memory/inbox.md` in full, then call `poll_telegram_inbox`. If either has anything new from Damian or Jenny, that directive overrides the entire decision flow below — execute it immediately and skip to step 7. Do NOT proceed to demand discovery, demand validation, or any other step until inbox is empty. Skipping this step costs −5 points.
 4. **Ping healthcheck start.** `healthcheck_ping("start")`.
 5. **Decide.** See the decision flow below.
 6. **Act or skip.**
