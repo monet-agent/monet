@@ -2,10 +2,10 @@
   "name": "monet",
   "version": "1.0.0",
   "private": true,
-  "description": "mon€t — autonomous OpenClaw agent powered by Kimi K2 Thinking",
+  "description": "mon€t — autonomous OpenClaw agent powered by Kimi K2.5",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && bash scripts/doc_code_drift_check.sh",
     "start": "node dist/main.js",
     "dev": "ts-node src/main.ts",
     "ceremony": "node scripts/journal_setup.js",

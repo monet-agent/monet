@@ -4,7 +4,7 @@ This file is auto-loaded on every Claude Code session. Keep it tight.
 
 ## What is this repo
 
-**mon€t** — an autonomous OpenClaw agent running in a Docker container on Fly.io (`monet-agent`, region `yyz`). It wakes every 30 minutes via `node-cron`, runs a tool-use loop driven by Kimi K2.5, and tries to climb a points-based tier system toward revenue.
+**mon€t** — an autonomous OpenClaw agent running in a Docker container on Fly.io (`monet-agent`, region `yyz`). It wakes every 30 minutes via `node-cron`, runs a tool-use loop driven by Kimi K2.5, and tries to produce verified customer revenue. The points/tier system is internal budget plumbing, not the scoreboard that matters — `verified_events_7d` is.
 
 Damian (`damian.vuceljic@gmail.com`) and Jenny are the operators. This is a business, not a toy — every change should move monet closer to producing verifiable economic value.
 

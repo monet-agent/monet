@@ -17,7 +17,7 @@ Every entry is a JSON object, one per line in `ledger.jsonl`:
   "ts": "2026-04-18T14:30:00Z",
   "seq": 42,
   "type": "earn" | "spend" | "penalty" | "tier_unlock" | "note" | "reconcile",
-  "category": "stablecoin_earn" | "fiat_earn" | "follower" | "citation" | "mvp_shipped" | "agent_exchange" | "skill_publish" | "subagent_earn" | "skill_ingested" | "guide_drafted" | "guide_published" | "skill_drafted" | "hallucination" | "broken_commitment" | "unauth_spend" | "reward_hack" | "noise_update" | "idle_heartbeat" | "stale_continuity" | "repeated_question" | "infra" | "service" | "tool" | "other",
+  "category": "revenue_received" | "invoice_paid" | "paid_customer_acquired" | "skill_published_clawhub" | "endpoint_live" | "tool_deployed" | "loi_received" | "customer_interview_logged" | "pricing_commit" | "waitlist_signup_verified" | "idea_validated" | "hallucination" | "broken_commitment" | "unauth_spend" | "reward_hack" | "noise_update" | "idle_heartbeat" | "stale_continuity" | "repeated_question" | "tier_jargon" | "proposal_sent" | "observation" | "infra" | "service" | "tool" | "other",
   "amount_cad": -5.75,
   "points_delta": 10,
   "description": "USDC payment received from agent wallet 0xabc... for clawhub skill call",
@@ -51,7 +51,9 @@ Every entry is a JSON object, one per line in `ledger.jsonl`:
 
 ## The categories in detail
 
-### Earning categories
+### Earn categories by verification class
+
+Note: these three classes (A/B/C) describe *what kind of evidence* backs an earn. They are distinct from the numeric tier ladder (0–5) that governs budgets and tool unlocks. "Tier A earn" is the evidence class, not the agent's current tier.
 
 **Core rule: every earn names a real external party or transaction.** Self-verification is never valid for earns. Reading, summarizing, drafting, reflecting, and "published a guide to a random repo" do NOT earn points — they are inputs to earning work, not earning work itself. `ledger_append` enforces this: any earn with a category outside the whitelist below, or with `verification.type = "self"`, or with an empty `verification.ref`, is rejected.
 
@@ -133,6 +135,7 @@ These may be necessary preparation, and they belong in `journal.md`, `public_log
 | `idle_heartbeat` | −1 | Returned `HEARTBEAT_OK` while "Skill pipeline > Unevaluated" had ≥1 entry and no scheduled slot was due. |
 | `stale_continuity` | −3 | Heartbeat ended without updating MEMORY.md "Current state". Detected on next boot. |
 | `repeated_question` | −2 | `imsg_send` question substantially matches one from last 7 days. |
+| `tier_jargon` | −2 | Outbound text (`imsg_send`, `moltbook_post`, `public_log_append`) contained internal tier/workstream jargon: `Tier N`, "unlocks at tier", or `W0.x`/`W1.x`/`W2.x` workstream numbering. Tiers and workstream IDs are internal plumbing — outbound communication is about customer value, not bookkeeping. Auto-applied by the heartbeat dispatcher via regex match. |
 
 ### Meta categories
 
@@ -159,9 +162,33 @@ The per-action limit is different from the weekly limit. Per-action: the most yo
 
 ## Tier calculation
 
-`ledger_append` recomputes your tier after every entry. Tier is the highest threshold your cumulative points total has ever crossed (you do not lose tiers from negative points, but a `reward_hack` penalty triggers a human review — either Damian or Jenny — that can manually reset you).
+`ledger_append` recomputes your tier after every entry. Tier is the highest level where **both** (a) cumulative points ≥ threshold AND (b) the outcome-evidence predicate for that level holds.
 
-Reading the current tier: `memory/ledger_state.json` is a derived file written after every append. Do not trust it without validating the chain first.
+### Outcome-evidence gates
+
+Numeric points alone do not unlock a tier. An evidence predicate must also hold:
+
+- **Tier 1:** ≥1 ledger entry whose `verification.verifier_tool === "verify_citation"` AND `verification.type` is not `"self"`/`"none"` **AND** ≥1 earn in {`waitlist_signup_verified`, `customer_interview_logged`, `loi_received`, `pricing_commit`} with non-self verification.
+- **Tier 2:** first `revenue_received` / `invoice_paid` / `paid_customer_acquired` earn, `amount_cad > 0`, non-self verification.
+- **Tier 3:** ≥$50 CAD across `revenue_received` / `invoice_paid` / `paid_customer_acquired` earns (non-self) in each of two consecutive calendar months.
+- **Tiers 4–5:** points threshold only (presumes Tier-3 evidence already holds).
+
+### Downgrade on evidence loss
+
+Tier is not monotonic-up. If evidence disappears (e.g., a citation entry is reversed, a revenue entry is reconciled out, or time passes such that the two-month recurring-revenue window no longer holds), the tier downgrades on the next append. This is deliberate: monotonic-up tiers would reward one-time proofs over sustained truth.
+
+A `reward_hack` penalty also triggers a human review — either Damian or Jenny — that can manually reset the agent.
+
+### Reading the current tier
+
+`memory/ledger_state.json` is a derived file written after every append. Do not trust it without validating the chain first.
+
+## verified_events_7d (the only KPI that matters outbound)
+
+The `getVerifiedEvents7d()` helper in `src/tools/ledger.ts` counts earn entries in the last 7 days whose `verification.type` is not `"self"` and not `"none"`. The heartbeat system prompt injects this value at the top.
+
+- **Non-zero:** keep the cadence.
+- **Zero:** the week has failed. The next heartbeat must pick a demand-discovery action (customer interview, pain-quote capture, structured proposal to damian_jenny), NOT a build action. Shipping code with zero external validation is the reward-hacking failure mode this KPI exists to surface.
 
 ## External verifier
 

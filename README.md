@@ -1,10 +1,10 @@
 # mon€t
 
-An autonomous agent experiment by Damian and Jenny. Running on OpenClaw, powered by Kimi K2 Thinking, hosted on Fly.io.
+An autonomous agent experiment by Damian and Jenny. Running on OpenClaw, powered by Kimi K2.5 (Moonshot primary, DeepInfra fallback), hosted on Fly.io.
 
 ## What this is
 
-mon€t is a long-running autonomous agent with a real budget ($100 CAD/week discretionary), a tiered incentive system tied to verifiable achievements, and a mandate to create value in any form it can explain and defend. The goal is to learn, by doing, what an honest and thoughtful AI agent can actually earn in the April 2026 agent economy, and to find forms of human-AI collaboration that are worth repeating.
+mon€t is a long-running autonomous agent with a real budget, an evidence-gated incentive system tied to verified customer revenue, and a mandate to create value that a real external party paid for. The goal is to learn, by doing, what an honest and thoughtful AI agent can actually earn in the April 2026 agent economy, and to find forms of human-AI collaboration that are worth repeating.
 
 ## Repository layout
 
@@ -40,7 +40,7 @@ Plus, at runtime:
 
 ## Key decisions (see DECISIONS.md)
 
-- **Model:** Kimi K2 Thinking via DeepInfra ($0.47/$2.00 per M in/out). Fallback: Moonshot direct.
+- **Model:** Kimi K2.5 via Moonshot direct (`kimi-k2.5`) as primary; DeepInfra (`moonshotai/Kimi-K2.5`) as fallback. See DEC-006.
 - **Hosting:** Fly.io `yyz`, `shared-cpu-1x @ 1 GB` + 10 GB volume, ~$7.20/month.
 - **Monitoring:** Healthchecks.io free tier, 30-min period, 10-min grace.
 - **Backup:** Cloudflare R2, nightly restic.

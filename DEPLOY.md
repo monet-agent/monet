@@ -21,15 +21,15 @@ Nothing in here should be done by the agent or scripted away — these are human
 2. Go to API Keys → Create
 3. Name it `monet-kimi-primary`
 4. Copy the key → this is `KIMI_API_KEY`
-5. Verify the model is available: `kimi-k2-thinking`
+5. Verify the model is available: `kimi-k2.5`
 
-### 1.2 DeepInfra (fallback LLM)
+### 1.2 DeepInfra (fallback LLM + quarantine auditor)
 
 1. Sign up at https://deepinfra.com
 2. Go to Account → API Keys → Create Key
 3. Name it `monet-kimi-fallback`
 4. Copy → `KIMI_FALLBACK_KEY`
-5. Verify the model is available: `moonshotai/Kimi-K2-Thinking`
+5. Verify the models are available: `moonshotai/Kimi-K2.5` (fallback) and `zai-org/GLM-5.1` (quarantine auditor — cross-family by design)
    Expected output: model shows as available with pricing ~$0.47/$2.00 per M tokens
 
 ### 1.3 Healthchecks.io

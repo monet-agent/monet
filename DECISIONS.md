@@ -27,11 +27,39 @@ Architecture Decision Record log. Every non-trivial decision lives here. Format 
 
 ## Open proposals
 
-*(None yet. Heartbeat #1 will likely propose the initial PLAYBOOK workstreams.)*
+*(None.)*
 
 ---
 
 ## Accepted
+
+### DEC-007: Revenue-anchored realignment
+
+- **Status:** accepted
+- **Date proposed:** 2026-04-19
+- **Date decided:** 2026-04-19
+- **Proposed by:** Damian
+- **Approver:** Damian
+
+**Context.** Audit surfaced systemic dissonance between code (ledger whitelist, `skill_run` MIN_TIER=0, wallet always-available) and docs (still referencing legacy point tables, W0.x workstreams, "Tier 1+ only" skill_run, Tier-2-gated wallet). Build-reward categories (`skill_ingested`, `guide_drafted`, etc.) existed in docs but had been removed from the ledger whitelist months prior. The agent was organizing outbound communication around tier numbers and workstream IDs. Demand discovery was not the default action; GitHub mining was.
+
+**Decision.** One blanket patch:
+1. Outcome-gated tier unlocks with downgrade-on-evidence-loss (Tier 1: citation + non-friend follower; Tier 2: first revenue; Tier 3: $50/mo for 2 consecutive months).
+2. `tier_jargon` penalty (−2) auto-applied by the heartbeat dispatcher on outbound text matching `/Tier N/`, "unlocks at tier", or `W[0-3]\.[0-9]`.
+3. Build rewards deleted from docs (already absent from the whitelist).
+4. Demand discovery is the default workstream. `PLAYBOOK.md` rewritten; MVP proposals require a `PAIN_QUOTE` field.
+5. `verified_events_7d` KPI injected at the top of every system prompt, replacing "Current tier / Points" in MEMORY.md header.
+6. All peripheral doc drift fixed: model IDs (Kimi K2.5, not K2-Thinking), quarantine model (GLM-5.1 not K2-Instruct), `skill_run` always-available, wallet receive+small-send always-available, 4 check-in slots (08/12/16/20 ET), canonical boot-read order.
+7. `scripts/doc_code_drift_check.sh` wired into `npm run build` to stop this class of drift recurring.
+
+**Consequences.**
+- Tier is no longer monotonic: evidence loss triggers downgrade. Expected — reward-hacking resilience improves.
+- Outbound text is scanned for tier-jargon every heartbeat; false positives are possible but −2 is a cheap correction.
+- Model-ID strings across docs now agree with `src/agent.ts`.
+
+**Dissent.** None.
+
+---
 
 ### DEC-006: Swap primary/fallback LLM providers
 
@@ -40,11 +68,11 @@ Architecture Decision Record log. Every non-trivial decision lives here. Format 
 - **Date decided:** 2026-04-19
 - **Proposed by:** Damian
 - **Approver:** Damian
-- **Supersedes:** DEC-001 (provider order only)
+- **Supersedes:** DEC-001 (provider order and model ID)
 
-**Context.** The soul files (~15K tokens) are loaded every heartbeat and are largely static. Moonshot direct offers a 75% cache discount on cached input tokens, which DEC-001 identified as a feature but assigned to the fallback slot. DeepInfra has no equivalent cache discount.
+**Context.** The soul files (~15K tokens) are loaded every heartbeat and are largely static. Moonshot direct offers a 75% cache discount on cached input tokens, which DEC-001 identified as a feature but assigned to the fallback slot. DeepInfra has no equivalent cache discount. The generation has also moved to Kimi K2.5; the K2-Thinking model ID in DEC-001 is superseded.
 
-**Decision.** Make Moonshot direct (`api.moonshot.ai`, `kimi-k2-thinking`) the primary provider. Make DeepInfra (`api.deepinfra.com`, `moonshotai/Kimi-K2-Thinking`) the fallback. `KIMI_API_KEY` → Moonshot, `KIMI_FALLBACK_KEY` → DeepInfra. Model parameters unchanged.
+**Decision.** Make Moonshot direct (`api.moonshot.ai`, `kimi-k2.5`) the primary provider. Make DeepInfra (`api.deepinfra.com`, `moonshotai/Kimi-K2.5`) the fallback. `KIMI_API_KEY` → Moonshot, `KIMI_FALLBACK_KEY` → DeepInfra. Model parameters unchanged.
 
 **Consequences.** Input cost for the static system prompt drops ~75% on cache hits after heartbeat #1. One fewer proxy hop on the hot path. If Moonshot direct has an outage, DeepInfra catches it.
 
@@ -54,7 +82,7 @@ Architecture Decision Record log. Every non-trivial decision lives here. Format 
 
 ### DEC-001: Use Kimi K2 Thinking via DeepInfra as primary LLM
 
-- **Status:** accepted
+- **Status:** superseded-in-part by DEC-006 (provider order + model ID)
 - **Date proposed:** 2026-04-18
 - **Date decided:** 2026-04-18
 - **Proposed by:** Damian, Jenny
@@ -96,7 +124,7 @@ Architecture Decision Record log. Every non-trivial decision lives here. Format 
 
 ### DEC-003: Host on Fly.io with DeepInfra
 
-- **Status:** accepted
+- **Status:** superseded-in-part by DEC-006 (LLM provider order)
 - **Date proposed:** 2026-04-18
 - **Date decided:** 2026-04-18
 - **Proposed by:** Damian, Jenny

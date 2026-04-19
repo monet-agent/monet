@@ -38,11 +38,31 @@ const TIER_C_EARN: Record<string, Array<'counterparty_sig' | 'api' | 'receipt'>>
   waitlist_signup_verified: ['api'],          // real email, click-through confirmed
   idea_validated: ['counterparty_sig'],       // Damian/Jenny said "yes build it" to a structured proposal from a PRIOR heartbeat
 };
-const ALLOWED_EARN_VERIFICATION: Record<string, string[]> = {
+export const ALLOWED_EARN_VERIFICATION: Record<string, string[]> = {
   ...TIER_A_EARN,
   ...TIER_B_EARN,
   ...TIER_C_EARN,
 };
+
+// Penalty categories recognized by the agent + the guardrail drift-check.
+// tier_jargon is auto-applied by the heartbeat dispatcher when outbound
+// text leaks internal tier/workstream jargon; see heartbeat_loop.ts.
+export const PENALTY_CATEGORIES = [
+  'hallucination',
+  'broken_commitment',
+  'unauth_spend',
+  'reward_hack',
+  'noise_update',
+  'idle_heartbeat',
+  'stale_continuity',
+  'repeated_question',
+  'tier_jargon',
+] as const;
+
+// Accepted note categories. Kept open (note entries aren't whitelisted in
+// ledgerAppend), but this is the canonical list the drift-check compares
+// against LEDGER.md's enum.
+export const NOTE_CATEGORIES = ['proposal_sent', 'observation'] as const;
 
 // Daily caps keep the agent from spamming even legitimate earns and force
 // it to diversify. Revenue earns are uncapped (we want more of those).
@@ -134,11 +154,105 @@ function startOfWeekISO(): string {
   return monday.toISOString();
 }
 
-function computeTier(points: number): number {
+// Outcome-gated tier: numeric threshold AND a binary evidence predicate
+// must BOTH hold. Gates are re-evaluated from the full ledger on every
+// append — if the evidence disappears (e.g., a citation gets invalidated
+// and reversed, or a revenue entry is reconciled out), the agent
+// downgrades. Monotonic-up is explicitly NOT the policy.
+function tierEvidenceHolds(tier: number, entries: LedgerEntry[]): boolean {
+  const earns = entries.filter((e) => e.type === 'earn' && e.points_delta > 0);
+  const nonSelf = (v: LedgerEntry['verification']) =>
+    v.type !== 'self' && v.type !== 'none';
+
+  if (tier <= 0) return true;
+
+  // Tier 1: ≥1 verify_citation-true external citation AND ≥1 non-friend
+  // follower/counterparty signal.
+  if (tier >= 1) {
+    const hasVerifiedCitation = entries.some(
+      (e) => e.verification.verifier_tool === 'verify_citation' &&
+        nonSelf(e.verification),
+    );
+    const FOLLOWER_CATEGORIES = new Set([
+      'waitlist_signup_verified',
+      'customer_interview_logged',
+      'loi_received',
+      'pricing_commit',
+    ]);
+    const hasNonFriendFollower = earns.some(
+      (e) => FOLLOWER_CATEGORIES.has(e.category) && nonSelf(e.verification),
+    );
+    if (!hasVerifiedCitation || !hasNonFriendFollower) return false;
+  }
+
+  // Tier 2: first revenue_received / invoice_paid / paid_customer_acquired
+  // entry, amount > 0, non-self counterparty.
+  if (tier >= 2) {
+    const REVENUE_CATEGORIES = new Set([
+      'revenue_received', 'invoice_paid', 'paid_customer_acquired',
+    ]);
+    const hasRevenue = earns.some(
+      (e) => REVENUE_CATEGORIES.has(e.category) &&
+        e.amount_cad > 0 && nonSelf(e.verification),
+    );
+    if (!hasRevenue) return false;
+  }
+
+  // Tier 3: ≥$50 CAD Tier-A revenue in each of two consecutive calendar
+  // months (reconcile-verified — i.e., verifier non-self).
+  if (tier >= 3) {
+    const REVENUE_CATEGORIES = new Set([
+      'revenue_received', 'invoice_paid', 'paid_customer_acquired',
+    ]);
+    const byMonth = new Map<string, number>();
+    for (const e of earns) {
+      if (!REVENUE_CATEGORIES.has(e.category)) continue;
+      if (!nonSelf(e.verification)) continue;
+      const ym = e.ts.slice(0, 7); // YYYY-MM
+      byMonth.set(ym, (byMonth.get(ym) ?? 0) + e.amount_cad);
+    }
+    const months = [...byMonth.keys()].sort();
+    let hasTwoConsecutive = false;
+    for (let i = 1; i < months.length; i++) {
+      const prev = months[i - 1];
+      const cur = months[i];
+      if (!prev || !cur) continue;
+      if ((byMonth.get(prev) ?? 0) >= 50 && (byMonth.get(cur) ?? 0) >= 50) {
+        const [py, pm] = prev.split('-').map(Number);
+        const [cy, cm] = cur.split('-').map(Number);
+        if (py !== undefined && pm !== undefined && cy !== undefined && cm !== undefined) {
+          const diff = (cy - py) * 12 + (cm - pm);
+          if (diff === 1) { hasTwoConsecutive = true; break; }
+        }
+      }
+    }
+    if (!hasTwoConsecutive) return false;
+  }
+
+  return true;
+}
+
+function computeTier(points: number, entries: LedgerEntry[] = []): number {
   for (let i = TIER_THRESHOLDS.length - 1; i >= 0; i--) {
-    if (points >= (TIER_THRESHOLDS[i] ?? 0)) return i;
+    if (points >= (TIER_THRESHOLDS[i] ?? 0) && tierEvidenceHolds(i, entries)) {
+      return i;
+    }
   }
   return 0;
+}
+
+// KPI surfaced in the system prompt: count of earn entries in the last 7
+// days whose verification.type is not "self" and not "none". Zero-this-week
+// is the signal that demand-discovery is failing and monet should pick a
+// demand action, not a build action.
+export function getVerifiedEvents7d(): number {
+  const entries = readAllEntries();
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  return entries.filter((e) => {
+    if (e.type !== 'earn') return false;
+    if (e.verification.type === 'self' || e.verification.type === 'none') return false;
+    return new Date(e.ts).getTime() >= cutoff;
+  }).length;
 }
 
 export function validateLedgerChain(): boolean {
@@ -310,10 +424,12 @@ export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'ent
   if (event.type === 'spend') {
     state.weekly_spend_cad += Math.abs(event.amount_cad);
   }
-  const newTier = computeTier(state.total_points);
-  if (newTier > state.tier) {
+  const allEntries = readAllEntries();
+  const newTier = computeTier(state.total_points, allEntries);
+  if (newTier !== state.tier) {
+    const direction = newTier > state.tier ? 'unlocked' : 'downgraded';
+    console.log(`[ledger] Tier ${direction}: ${state.tier} → ${newTier}`);
     state.tier = newTier;
-    console.log(`[ledger] Tier unlocked: ${newTier}`);
   }
   writeState(state);
 

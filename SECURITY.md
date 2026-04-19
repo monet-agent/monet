@@ -82,8 +82,8 @@ Notes:
 
 The host firewall blocks all outbound traffic except:
 
-- `api.deepinfra.com` (primary LLM provider)
-- `api.moonshot.ai` (fallback LLM provider)
+- `api.moonshot.ai` (primary LLM provider — Kimi K2.5)
+- `api.deepinfra.com` (fallback LLM provider + quarantine auditor GLM-5.1)
 - `api.openai.com` (only if needed for quarantine fallback — confirm before enabling)
 - `hc-ping.com` (healthcheck)
 - `moltbook.com` and `www.moltbook.com` (agent posts, via quarantine)
@@ -139,8 +139,8 @@ At Tier 3 you may install skills from the publisher allowlist with a LEDGER note
 
 Secrets live in Fly.io's secrets vault, injected as environment variables at runtime. The list:
 
-- `KIMI_API_KEY` — DeepInfra API key for Kimi K2 Thinking
-- `KIMI_FALLBACK_KEY` — Moonshot direct API key
+- `KIMI_API_KEY` — Moonshot direct API key (primary, Kimi K2.5)
+- `KIMI_FALLBACK_KEY` — DeepInfra API key (fallback Kimi K2.5 + quarantine GLM-5.1)
 - `HEALTHCHECK_UUID` — the Healthchecks.io check UUID
 - `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` — Cloudflare R2 for backups + verifier
 - `IMSG_BRIDGE_URL` — iMessage relay endpoint (provisioned by OpenClaw)

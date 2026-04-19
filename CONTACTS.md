@@ -20,21 +20,28 @@ Contact info for people and services. Secrets are in Fly.io's vault (see SECURIT
 
 ## Services
 
-### Kimi K2 Thinking (primary LLM)
-- **Provider:** DeepInfra (`api.deepinfra.com`)
-- **Model name:** `moonshotai/Kimi-K2-Thinking`
-- **Endpoint:** OpenAI-compatible `/v1/chat/completions`
+### Kimi K2.5 (primary LLM)
+- **Provider:** Moonshot AI direct (`api.moonshot.ai`)
+- **Model name:** `kimi-k2.5`
+- **Endpoint:** OpenAI-compatible `/v1/chat/completions` (or Anthropic-shape `/anthropic`)
 - **Auth:** `KIMI_API_KEY` env var
 - **Required settings:** `temperature: 1.0`, `stream: true`, `max_tokens: 16000`, preserve `reasoning_content` across turns
-- **Docs:** https://deepinfra.com/moonshotai/Kimi-K2-Thinking
-
-### Kimi K2 fallback
-- **Provider:** Moonshot AI direct (`api.moonshot.ai`)
-- **Model name:** `kimi-k2-thinking`
-- **Endpoint:** OpenAI-compatible `/v1/chat/completions` (or Anthropic-shape `/anthropic`)
-- **Auth:** `KIMI_FALLBACK_KEY` env var
-- **Notes:** 75% discount on cached input — useful for the long stable system prompt
+- **Notes:** 75% discount on cached input — useful for the long stable system prompt. Moonshot-hosted builtins (`$web_search`, `$fetch`, `$code_runner`, etc.) are available here and NOT on the fallback.
 - **Docs:** https://platform.kimi.ai/docs
+
+### Kimi K2.5 fallback
+- **Provider:** DeepInfra (`api.deepinfra.com`)
+- **Model name:** `moonshotai/Kimi-K2.5`
+- **Endpoint:** OpenAI-compatible `/v1/chat/completions`
+- **Auth:** `KIMI_FALLBACK_KEY` env var
+- **Notes:** No server-side builtins — the primary path's `$web_search`/`$fetch` etc. become no-ops here. Kept as provider-failure insurance only.
+- **Docs:** https://deepinfra.com/moonshotai/Kimi-K2.5
+
+### Quarantine auditor (cross-family)
+- **Provider:** DeepInfra (`api.deepinfra.com`)
+- **Model name:** `zai-org/GLM-5.1`
+- **Purpose:** `quarantine_ingest` — extracts structured data from untrusted external content. Deliberately a different model family from the main loop so prompt-injection attacks don't collude across both calls.
+- **Auth:** shares `KIMI_FALLBACK_KEY` (DeepInfra).
 
 ### Healthchecks
 - **Provider:** Healthchecks.io free tier
@@ -50,11 +57,12 @@ Contact info for people and services. Secrets are in Fly.io's vault (see SECURIT
 - **Nightly backup:** restic, 03:00 ET, 30-day retention
 - **Verifier:** every ledger append pushes tip hash to `verifier/tip.json` via a separate credential mon€t does not hold
 
-### Agent wallet (Tier 2+)
-- **Provider:** Coinbase AgentKit
+### Agent wallet
+- **Provider:** Coinbase CDP Server Wallet
 - **Chain:** Base (L2)
 - **Signing:** MPC, keys routed through Fly's Tokenizer proxy
-- **Tool:** `agent_wallet_sign(tx)` — only unlocks at Tier 2
+- **Always-available tools:** `wallet_address()`, `wallet_balance()`, `wallet_send_usdc(to, amount_usdc)` (capped $5/send, $20/day)
+- **Tier-2 tool:** `agent_wallet_sign(tx)` for arbitrary transaction signing beyond the capped USDC send
 
 ### iMessage bridge
 - **Provider:** OpenClaw's imsg skill

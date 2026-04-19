@@ -1,4 +1,4 @@
-// Sandboxed executor for installed skills. Tier-gated at Tier 1+.
+// Sandboxed executor for installed skills. Always-available (no tier gate).
 //
 // The Docker sandbox this agent runs in is already network=none and
 // read-only root with tmpfs scratch. Spawning a subprocess inherits
@@ -105,9 +105,7 @@ export async function skillRun(
 ): Promise<SkillRunResult> {
   const tier = currentTier();
   if (tier < MIN_TIER) {
-    throw new Error(
-      `skill_run requires Tier ${MIN_TIER}+ (current: ${tier}). Earn 50 points via W0.1 guides, W0.3 public log, or first revenue.`,
-    );
+    throw new Error(`skill_run tier check failed (current: ${tier}, min: ${MIN_TIER}).`);
   }
 
   const rt = ALLOWED_RUNTIMES[runtime];
@@ -199,7 +197,7 @@ export const skillRunTools = [
     function: {
       name: 'skill_run',
       description:
-        'Execute an entry file inside an installed skill in a sandboxed subprocess. Tier 1+ only. No network (inherited from container). No secrets in env. CWD = skill directory. TMPDIR = workspace/scratch. Timeout 30s default, 120s max. stdout/stderr truncated at 64KB each. Use for: testing a skill before writing its guide, generating demo output to cite, running the Continuity skill reconciliation against your own logs.',
+        'Execute an entry file inside an installed skill in a sandboxed subprocess. Always available. No network (inherited from container). No secrets in env. CWD = skill directory. TMPDIR = workspace/scratch. Timeout 30s default, 120s max. stdout/stderr truncated at 64KB each. Use for: testing a skill before writing its guide, generating demo output to cite, running reconciliations against your own logs.',
       parameters: {
         type: 'object',
         properties: {

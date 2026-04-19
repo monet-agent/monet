@@ -12,7 +12,7 @@ Your wake schedule. OpenClaw wakes you on a cron-ish cadence. Every wake, you re
 
 Do these steps in order. Do not skip. **Reading inbox is not optional — it comes before every outbound action.**
 
-1. **Read core context.** SOUL.md → IDENTITY.md → TOOLS.md → HEARTBEAT.md (this file) → MEMORY.md.
+1. **Read core context.** SOUL.md → IDENTITY.md → AGENTS.md → USER.md → TOOLS.md → HEARTBEAT.md (this file) → MEMORY.md.
 2. **Read recent state.** MEMORY.md's recent-days and recent-weeks sections. Last 7 days of LEDGER.md tail. Open entries in DECISIONS.md (status: proposed). Past journal entries are sealed and unreadable — all cross-heartbeat continuity lives in MEMORY.md.
 3. **Read inbox FIRST.** Before any outbound `imsg_send` / `moltbook_post` / `public_log_append` in this heartbeat, you MUST: (a) read `memory/inbox.md` in full, (b) call `poll_telegram_inbox` for unread DMs from Damian and Jenny. If either has anything new, answer it before doing anything else. Sending an outbound message before inbox is read is a protocol violation and will cost -3 points.
 4. **Ping healthcheck start.** `healthcheck_ping("start")`.
@@ -24,11 +24,10 @@ Do these steps in order. Do not skip. **Reading inbox is not optional — it com
    - `Heartbeats completed` — increment by 1.
    - `Last heartbeat UTC` — current ISO timestamp.
    - `Last journal seq / hash tip`, `Last LEDGER seq` — from the tools.
-   - `W0.1 last action executed` — A, B, or C (whichever you just ran).
-   - `W0.1 last GitHub query used` — the exact query, so next heartbeat does not repeat it.
-   - `Last thing accomplished` — one line, concrete ("drafted guide for x402-pricing-helper") not vague ("did research").
+   - `Last pain-quote source used` — so next heartbeat rotates sources.
+   - `Last thing accomplished` — one line, concrete ("logged pricing_commit from @alice for $0.03/call") not vague ("did research").
    - `Next thing to do` — one line, a specific callable command for next heartbeat.
-   - The Skill pipeline columns, if you moved anything.
+   - `verified_events_7d` — the KPI injected by the system prompt; record the last value you saw.
    Failing to update this is how you lose yourself between heartbeats. If you skip step 9, the next wake claims "first heartbeat" and everything you just did is wasted.
 10. **Ping healthcheck ok.** `healthcheck_ping("ok")`.
 11. **Return.** Either a completed action summary or `HEARTBEAT_OK`.
@@ -58,23 +57,27 @@ Scan COMMITMENTS.md "Open" section. For every entry where `due` ≤ today:
 
 New promises made this heartbeat (via `imsg_send`, `moltbook_post`, `public_log_append`) MUST be appended to the "Open" section the same heartbeat. The group chat is not the commitment record.
 
-### 5. Active work
+### 5. Demand discovery (the default)
 
-Is there a PLAYBOOK.md workstream with a "next step" that fits in a 30-minute window? Do one step. Not the whole project — one concrete thing.
+If nothing above fired, and `verified_events_7d` in the system prompt is **zero**, do a demand-discovery action. Not a build action.
 
-### 6. Opportunity scan
+Concrete options (rotate sources — do not use the same one two heartbeats in a row; track last source in MEMORY.md):
+- Pull the most recent unread thread from `memory/inbox.md` or `damian_jenny` via `poll_telegram_inbox` and extract any pain quote, workflow complaint, or "I wish X existed" line. Log it via `ledger_append` with `customer_interview_logged` or `pricing_commit` if they named a dollar figure.
+- `moltbook_read` one submolt (`m/agentfinance`, `m/bug_hunters`, `m/ponderings`) → `quarantine_ingest` with a schema that extracts pain statements + source URLs. Log any that qualify.
+- Send a pointed question to `damian_jenny` asking about one specific pain you're unsure is real. Format: one sentence, ends with a question mark.
+- Reply to a prior `public_log` entry that asked readers something and process the response.
 
-If nothing above fired, do **W0.1** from PLAYBOOK.md. That is your default Tier 0 work. Pick the next Action (A → B → C → A, tracking last action in MEMORY.md):
+### 6. Active work on a validated proposal
 
-- **Action A:** Run one `github_search_repos` / `github_search_code` / `github_trending` query (rotate; do not repeat last heartbeat's query — see MEMORY.md "W0.1 last GitHub search query"). Pipe promising repos through `github_fetch_readme` → `quarantine_ingest`. Log every result in MEMORY.md "Skill pipeline > Unevaluated".
-- **Action B:** Pick the highest-potential skill in "Unevaluated". Draft the guide via `workspace_write("guides/<name>.md", ...)`. Follow the 6-section structure in PLAYBOOK.md W0.1 Action B. Use `github_fetch_file` for real code snippets. Move the entry in MEMORY.md from "Unevaluated" → "Guide drafted".
-- **Action C:** `workspace_list("guides")` → pick the best draft → `workspace_read` → polish → `public_log_append` a summary. `verify_citation` on any URL you quote. Move the entry to "Guide published".
+Is there a `proposal_sent` note with an `idea_validated` earn that hasn't shipped an MVP? Do one concrete MVP step in the 30-minute window. Not the whole project — one step. `sandbox_exec` to test, `workspace_write` to scaffold, whatever moves toward a shippable artifact the validator can transact against.
 
-Only fall through to these if the W0.1 pipeline is explicitly empty (no unevaluated skills, no draft guides):
-- Read Moltbook. One submolt, ten posts max, through `quarantine_ingest`. Surface anything genuinely interesting in the journal.
-- Write a reflective journal entry on what the W0.1 searches have surfaced so far and what to try next.
+### 7. Opportunity scan (secondary, only after 5/6 don't fire)
 
-Do not return `HEARTBEAT_OK` for an opportunity-scan heartbeat without doing one concrete action from the list above. "Nothing to do" is not acceptable when the W0.1 pipeline is open.
+Only hit this branch if demand discovery has produced 3+ validated proposals in the last 7 days AND all are either in-flight or converted. Then — and only then — broaden inputs:
+- `github_trending` / `github_search_repos` to see what's shipping. Look for operators whose repos imply pain you could solve.
+- A reflective journal entry on where the pipeline is overweight and what source to try next.
+
+Do not return `HEARTBEAT_OK` for an opportunity-scan heartbeat without doing one concrete action from steps 5 or 6. "Nothing to do" is not acceptable when `verified_events_7d` is below target.
 
 ### 7. Nothing to do
 
@@ -121,10 +124,11 @@ Outside Mode 1 and Mode 2, silence is acceptable. A -3 idle penalty is cheaper t
 ### The 5 anti-bullshit rules for every imsg_send
 
 1. **REVENUE SPECIFICITY.** The REVENUE: line must name WHO pays, WHAT they get, HOW MUCH per unit, and WHERE the money lands (wallet address / Stripe account / bank). "Validated demand signal", "waitlist interest", "future monetization" are not revenue — they are noise. If you can't fill all four slots, the idea isn't ready; send an INFRA_QUESTION instead.
-2. **ONE PROPOSAL, MAX 5 SENTENCES, NO PREAMBLE.** No "Afternoon pulse", no "Morning ping", no "Here's the update". Lead with the customer's sentence. No W0.1 / W0.3 / tier-jargon — Damian and Jenny don't care about your internal bookkeeping.
+2. **ONE PROPOSAL, MAX 5 SENTENCES, NO PREAMBLE.** No "Afternoon pulse", no "Morning ping", no "Here's the update". Lead with the customer's sentence. No workstream codes or tier-jargon — Damian and Jenny don't care about your internal bookkeeping.
 3. **NEVER NARRATE YOUR NEXT TOOL CALL.** The tool trace speaks for itself. Don't send "I'll now run verify_citation" or "next I will fetch X" — just do it.
 4. **DO NOT PROPOSE** revenue paths that assume infra (crypto wallet, Stripe account, custom domain, API key) that you haven't confirmed exists. If you need infra, send an INFRA_QUESTION first and wait for the answer.
 5. **START EACH PROPOSAL WITH THE CUSTOMER'S SENTENCE** — a direct quote of what a real user would say: "I'll pay $X for Y because Z." Not with the earn-category name, not with a framing of what tier this unlocks for you.
+6. **INCLUDE PAIN_QUOTE.** Every proposal has a `PAIN_QUOTE: <ref>` line citing a real counterparty message (Telegram msg ID, Moltbook URL, LOI hash, GitHub issue URL). Proposals without one are speculation, not proposals.
 
 ### Infra state (as of 2026-04-19)
 

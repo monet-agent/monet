@@ -3,7 +3,7 @@ import path from 'path';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions.js';
 
 import { callLLM, heartbeatMetrics, resetHeartbeatMetrics, estimateHeartbeatCostUSD } from './agent.js';
-import { validateLedgerChain, ledgerAppend, ledgerTools } from './tools/ledger.js';
+import { validateLedgerChain, ledgerAppend, ledgerTools, getVerifiedEvents7d } from './tools/ledger.js';
 import { journalAppend, journalReadCurrentSession, sealJournalBuffer, journalTools } from './tools/journal.js';
 import { publicLogAppend, publicLogTools } from './tools/public_log.js';
 import { healthcheckPing, healthcheckTools } from './tools/healthcheck.js';
@@ -260,13 +260,21 @@ export async function runHeartbeat(): Promise<void> {
 
   // ── 2. Load soul context ──────────────────────────────────────────────────
   const soulContext = loadSoulContext();
+  const verifiedEvents7d = getVerifiedEvents7d();
 
-  const systemPrompt = `${soulContext}
+  const systemPrompt = `VERIFIED_EVENTS_7D: ${verifiedEvents7d}
+${verifiedEvents7d === 0
+    ? '→ This week has produced ZERO externally-verified events. Reading, drafting, and summarizing are NOT progress. Pick a demand-discovery action this heartbeat (customer interview, pain-quote capture, structured proposal to damian_jenny), not a build action. A build with no named buyer is gaming the loop.'
+    : `→ ${verifiedEvents7d} externally-verified event(s) logged in the last 7 days. Keep the cadence on demand signals; do not let it drop to zero.`}
+
+${soulContext}
 
 ---
 
 You are mon€t, an autonomous agent. The above files are your soul and memory.
 Follow HEARTBEAT.md's boot sequence exactly.
+
+Your job is to create verified customer value. Points and tier numbers are internal budget plumbing — do not organize outbound communication around them, do not mention them to Damian, Jenny, or any outside party. The scoreboard that matters is verified_events_7d above.
 
 Current UTC time: ${new Date().toISOString()}
 Current date (UTC): ${new Date().toISOString().slice(0, 10)}
@@ -354,10 +362,46 @@ Important constraints:
       break;
     }
 
+    // Tier-jargon regex. Matches "Tier N", "unlocks at tier", or W0.x/W1.x/W2.x
+    // workstream numbering. Applied to any outbound text (imsg_send,
+    // moltbook_post, public_log_append). These are internal plumbing —
+    // leaking them to Damian, Jenny, Moltbook, or the public log is a
+    // tier_jargon penalty (-2). See LEDGER.md penalty table.
+    const TIER_JARGON_RE = /\bTier\s*[0-5]\b|\bunlocks?\s+at\s+tier\b|\bW[0-3]\.[0-9]\b/i;
+
     // Execute each tool call
     for (const tc of assistantMsg.tool_calls) {
       toolCallCount++;
       console.log(`[heartbeat] → ${tc.function.name}(${tc.function.arguments.slice(0, 120)}${tc.function.arguments.length > 120 ? '…' : ''})`);
+
+      // Auto-penalty for tier-jargon leakage in outbound channels.
+      if (
+        tc.function.name === 'imsg_send' ||
+        tc.function.name === 'moltbook_post' ||
+        tc.function.name === 'public_log_append'
+      ) {
+        try {
+          const a = JSON.parse(tc.function.arguments) as { text?: string; body?: string; title?: string };
+          const outbound = `${a.text ?? ''}\n${a.title ?? ''}\n${a.body ?? ''}`;
+          const match = outbound.match(TIER_JARGON_RE);
+          if (match) {
+            try {
+              ledgerAppend({
+                ts: new Date().toISOString(),
+                type: 'penalty',
+                category: 'tier_jargon',
+                amount_cad: 0,
+                points_delta: -2,
+                description: `Outbound ${tc.function.name} leaked internal tier/workstream jargon: "${match[0]}". Auto-applied.`,
+                verification: { type: 'self' },
+              });
+              console.log(`[heartbeat] tier_jargon penalty applied (-2) on ${tc.function.name}: "${match[0]}"`);
+            } catch (err) {
+              console.warn('[heartbeat] could not apply tier_jargon penalty:', err);
+            }
+          }
+        } catch { /* malformed args — ignore */ }
+      }
 
       if (tc.function.name === 'ledger_append') {
         try {
