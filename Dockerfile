@@ -35,7 +35,7 @@ COPY openclaw.json ./
 # is the live copy. The entrypoint syncs these to /data on first boot.
 COPY SOUL.md IDENTITY.md AGENTS.md USER.md TOOLS.md HEARTBEAT.md \
      MEMORY.md PLAYBOOK.md LEDGER.md ROSTER.md SECURITY.md CONTACTS.md \
-     DECISIONS.md RELATIONSHIPS.md README.md ./soul_files/
+     DECISIONS.md RELATIONSHIPS.md COMMITMENTS.md README.md ./soul_files/
 
 # Copy memory defaults
 COPY memory/ ./soul_files/memory/

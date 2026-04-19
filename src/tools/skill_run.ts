@@ -18,7 +18,12 @@ const INSTALL_ROOT = () => path.join(DATA_DIR(), 'installed_skills');
 const LEDGER_STATE = () => path.join(DATA_DIR(), 'memory/ledger_state.json');
 const SCRATCH_ROOT = () => path.join(DATA_DIR(), 'workspace/scratch');
 
-const MIN_TIER = 1;
+// Lowered to 0 on 2026-04-19 — monet can't earn its way to Tier 1 without
+// the ability to actually run and test skills. The sandbox (spawn + no
+// network + no secrets + timeout + size caps) is the real safety boundary,
+// not the tier gate. E2B remote sandbox (see sandbox_exec) is the real
+// capability upgrade for anything with deps.
+const MIN_TIER = 0;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_STDIO_BYTES = 64 * 1024;

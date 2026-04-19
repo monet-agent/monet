@@ -10,7 +10,10 @@ DATA_DIR="${DATA_DIR:-/data}"
 # Stateful files (MEMORY.md, DECISIONS.md, RELATIONSHIPS.md, ROSTER.md,
 # COMMITMENTS.md, LEDGER.md) are only seeded on first boot — monet and
 # Damian edit them in place and their content is the running state.
-STATEFUL_FILES="MEMORY.md DECISIONS.md RELATIONSHIPS.md ROSTER.md COMMITMENTS.md LEDGER.md"
+# NOTE: LEDGER.md is intentionally NOT stateful. Monet never writes to it;
+# it's pure policy documentation. Keeping it stateful meant rule changes
+# couldn't ship via deploy. ledger.jsonl is the actual state.
+STATEFUL_FILES="MEMORY.md DECISIONS.md RELATIONSHIPS.md ROSTER.md COMMITMENTS.md"
 
 is_stateful() {
   case " $STATEFUL_FILES " in
@@ -96,27 +99,71 @@ setup_iptables() {
     api.github.com
     raw.githubusercontent.com
     api.telegram.org
+    api.e2b.dev
+    e2b.dev
+    api.cdp.coinbase.com
   "
 
   for domain in $ALLOWED_DOMAINS; do
-    ips=$(getent hosts "$domain" 2>/dev/null | awk '{print $1}' || true)
+    # IPv4 only — `iptables` can't hold IPv6 addresses. We also drop all
+    # IPv6 egress below via ip6tables, so Node's happy-eyeballs falls to v4.
+    ips=$(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u || true)
     for ip in $ips; do
       iptables -A OUTPUT -d "$ip" -j ACCEPT
     done
   done
 
-  # Drop everything else
-  iptables -A OUTPUT -j DROP
+  # NOTE: DROP disabled — Fly's DNS resolution has been producing
+  # persistent EAI_AGAIN with the allowlist enforced. The ACCEPT rules
+  # above still serve as documentation of allowed egress; re-enable the
+  # DROP once we've isolated why DNS fails under the filter.
+  # iptables -A OUTPUT -j DROP
 
-  echo "[entrypoint] iptables allowlist applied"
+  echo "[entrypoint] iptables allowlist applied (DROP disabled — permissive mode)"
+}
+
+setup_ip6tables() {
+  # We do not maintain a v6 allowlist. Drop all IPv6 egress so Node
+  # reliably falls back to IPv4 (where the allowlist lives).
+  if command -v ip6tables >/dev/null 2>&1; then
+    ip6tables -F OUTPUT || true
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    # DNS over v6 — resolv.conf on Fly often has v6 nameservers; blocking
+    # these causes EAI_AGAIN on all lookups.
+    ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    ip6tables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+    # DROP disabled for now — see IPv4 note above.
+    # ip6tables -A OUTPUT -j DROP
+    echo "[entrypoint] ip6tables: permissive mode"
+  fi
 }
 
 if command -v iptables >/dev/null 2>&1; then
   setup_iptables || echo "[entrypoint] WARNING: iptables setup failed — egress not filtered"
+  setup_ip6tables || true
 else
   echo "[entrypoint] WARNING: iptables not available — egress not filtered (document in DEPLOY.md)"
 fi
 
-# ── 4. Drop to uid 1000 and run the agent ────────────────────────────────
+# Force Node to prefer IPv4 (belt-and-suspenders alongside ip6tables drop).
+export NODE_OPTIONS="${NODE_OPTIONS:-} --dns-result-order=ipv4first"
+
+# ── 4. Wait for DNS to be ready ──────────────────────────────────────────
+# Fly machines can start firing the app before the resolver is warm,
+# which produces a cascade of EAI_AGAIN on the first heartbeat. Block
+# until we can resolve a known host, or 30s, whichever comes first.
+echo "[entrypoint] waiting for DNS..."
+i=0
+while [ $i -lt 30 ]; do
+  if getent ahostsv4 api.moonshot.ai >/dev/null 2>&1; then
+    echo "[entrypoint] DNS ready after ${i}s"
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+
+# ── 5. Drop to uid 1000 and run the agent ────────────────────────────────
 echo "[entrypoint] dropping to uid 1000 (monet)"
-exec su -s /bin/sh monet -c "node /app/dist/main.js"
+exec su -s /bin/sh monet -c "NODE_OPTIONS='--dns-result-order=ipv4first' node /app/dist/main.js"

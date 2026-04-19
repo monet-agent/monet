@@ -87,11 +87,11 @@ export async function callLLM(
     ? tools.filter((t) => (t as unknown as { type?: string }).type !== 'builtin_function')
     : tools;
 
-  try {
-    // Streaming is required for Kimi Thinking to work correctly per
-    // Moonshot docs — reasoning_content is delivered incrementally and
-    // long responses can exceed the non-streaming request timeout.
-    const stream = await client.chat.completions.create({
+  // Retry transient DNS failures before giving up on this model. Fly's
+  // resolver occasionally returns EAI_AGAIN under load; one quick retry
+  // almost always succeeds and keeps a mid-heartbeat LLM call alive.
+  const createWithDnsRetry = async (): Promise<unknown> => {
+    const params = {
       model,
       messages,
       tools: effectiveTools.length > 0 ? effectiveTools : undefined,
@@ -99,8 +99,30 @@ export async function callLLM(
       temperature: 1.0,
       stream: true,
       stream_options: { include_usage: true },
-      max_tokens: 16000,
-    } as Parameters<typeof client.chat.completions.create>[0]);
+      max_tokens: 100000,
+    } as Parameters<typeof client.chat.completions.create>[0];
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await client.chat.completions.create(params);
+      } catch (e) {
+        lastErr = e;
+        const code = (e as { cause?: { code?: string }; code?: string })?.cause?.code
+          ?? (e as { code?: string })?.code;
+        const isDns = code === 'EAI_AGAIN' || code === 'ENOTFOUND';
+        if (!isDns || attempt === 2) throw e;
+        console.warn(`[agent] DNS retry ${attempt + 1}/2 on ${model} (${code})`);
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    throw lastErr;
+  };
+
+  try {
+    // Streaming is required for Kimi Thinking to work correctly per
+    // Moonshot docs — reasoning_content is delivered incrementally and
+    // long responses can exceed the non-streaming request timeout.
+    const stream = await createWithDnsRetry() as Awaited<ReturnType<typeof client.chat.completions.create>>;
 
     let content = '';
     let reasoning = '';
@@ -186,6 +208,12 @@ export async function callLLM(
       usage,
     };
 
+    console.log(
+      `[agent] model=${modelReported} finish=${finishReason ?? 'n/a'} ` +
+      `tool_calls=${toolCalls.length} content_chars=${content.length} ` +
+      `reasoning_chars=${reasoning.length} ` +
+      `tokens=prompt:${usage?.prompt_tokens ?? '?'}/completion:${usage?.completion_tokens ?? '?'}`,
+    );
     heartbeatMetrics.calls += 1;
     if (useFallback) heartbeatMetrics.fallback_used += 1;
     if (usage) {

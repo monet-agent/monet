@@ -145,15 +145,24 @@ export async function imsgSend(to: Recipient, text: string): Promise<{ ok: true;
 
   const chatId = resolveChatId(to);
 
-  await axios.post(
-    `https://api.telegram.org/bot${token}/sendMessage`,
-    {
-      chat_id: chatId,
-      text: cleanText,
-      parse_mode: 'Markdown',
-    },
-    { timeout: 15_000 },
-  );
+  // Try Markdown first, fall back to plain text on 400 (common when the
+  // message has unbalanced *, _, or [ that break Telegram's legacy parser).
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      { chat_id: chatId, text: cleanText, parse_mode: 'Markdown' },
+      { timeout: 15_000 },
+    );
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 400) throw err;
+    console.warn('[telegram] Markdown parse failed, retrying as plain text');
+    await axios.post(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      { chat_id: chatId, text: cleanText },
+      { timeout: 15_000 },
+    );
+  }
 
   return { ok: true, to };
 }

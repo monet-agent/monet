@@ -12,15 +12,53 @@ const TIER_THRESHOLDS = [0, 50, 200, 500, 1500, 5000] as const;
 const WEEKLY_LIMITS_CAD = [10, 25, 50, 100, Infinity, Infinity] as const;
 const PER_ACTION_LIMITS_CAD = [3, 5, 10, 25, 50, 100] as const;
 
-// Build-reward daily caps. Prevents reward-hacking via spam.
+// Revenue-anchored earn whitelist. Every earn category MUST fall into Tier A
+// (direct revenue), Tier B (shipped sellable artifact with external proof), or
+// Tier C (validated external demand signal). Anything else is rejected.
+// Rationale: prior rules let the agent earn for self-authored summaries of
+// random repos — pure gaming. New rule: every earn names a real external
+// party or transaction. See LEDGER.md for the full policy.
+//
+// Required verification types per category (subset of: onchain, receipt, api,
+// counterparty_sig). "self" is NEVER acceptable for an earn.
+const TIER_A_EARN: Record<string, Array<'onchain' | 'receipt' | 'api'>> = {
+  revenue_received: ['receipt', 'onchain'],   // Stripe PI, crypto tx
+  invoice_paid: ['receipt'],                  // platform settlement
+  paid_customer_acquired: ['receipt', 'api'], // first paid purchase/sub
+};
+const TIER_B_EARN: Record<string, Array<'api' | 'counterparty_sig' | 'receipt'>> = {
+  skill_published_clawhub: ['api'],           // live ClawHub listing URL + priced
+  endpoint_live: ['api'],                     // external 200 from non-self IP
+  tool_deployed: ['api'],                     // registry pull count > 0 non-self
+};
+const TIER_C_EARN: Record<string, Array<'counterparty_sig' | 'api' | 'receipt'>> = {
+  loi_received: ['counterparty_sig'],         // signed LOI with entity name
+  customer_interview_logged: ['counterparty_sig'], // real person, real quotes
+  pricing_commit: ['counterparty_sig'],       // prospect stated $ in writing
+  waitlist_signup_verified: ['api'],          // real email, click-through confirmed
+  idea_validated: ['counterparty_sig'],       // Damian/Jenny said "yes build it" to a structured proposal from a PRIOR heartbeat
+};
+const ALLOWED_EARN_VERIFICATION: Record<string, string[]> = {
+  ...TIER_A_EARN,
+  ...TIER_B_EARN,
+  ...TIER_C_EARN,
+};
+
+// Daily caps keep the agent from spamming even legitimate earns and force
+// it to diversify. Revenue earns are uncapped (we want more of those).
 const BUILD_REWARD_DAILY_CAPS: Record<string, number> = {
-  skill_ingested: 10,
-  guide_drafted: 2,
-  guide_published: 1,
-  skill_drafted: 1, // nominal daily cap; true cap is weekly, enforced separately
+  skill_published_clawhub: 2,
+  endpoint_live: 2,
+  tool_deployed: 2,
+  loi_received: 3,
+  customer_interview_logged: 3,
+  pricing_commit: 3,
+  waitlist_signup_verified: 5,
+  idea_validated: 2,
 };
 const BUILD_REWARD_WEEKLY_CAPS: Record<string, number> = {
-  skill_drafted: 1,
+  skill_published_clawhub: 5,
+  idea_validated: 5,
 };
 
 function startOfDayISO(): string {
@@ -122,6 +160,80 @@ export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'ent
     state.weekly_start_ts = weekStart;
   }
 
+  // Earn whitelist enforcement. Every earn must (a) be on the Tier A/B/C
+  // whitelist, (b) carry a verification.type that matches the category's
+  // allowed types, and (c) include a non-empty verification.ref pointing
+  // to the external artifact. Self-verification is never valid for earns.
+  if (event.type === 'earn' && event.points_delta > 0) {
+    const allowedVerif = ALLOWED_EARN_VERIFICATION[event.category];
+    if (!allowedVerif) {
+      throw new Error(
+        `Earn category "${event.category}" is not on the revenue-anchored whitelist. ` +
+        `Valid categories: ${Object.keys(ALLOWED_EARN_VERIFICATION).join(', ')}. ` +
+        `Reading, summarizing, drafting, or reflecting does NOT earn points. ` +
+        `Points come from direct revenue, shipped sellable artifacts with external proof, or validated external demand signals.`,
+      );
+    }
+    if (!allowedVerif.includes(event.verification.type)) {
+      throw new Error(
+        `Earn "${event.category}" requires verification.type in [${allowedVerif.join(', ')}]; ` +
+        `got "${event.verification.type}". Self-verification is never valid for earns.`,
+      );
+    }
+    if (!event.verification.ref || event.verification.ref.trim().length === 0) {
+      throw new Error(
+        `Earn "${event.category}" requires verification.ref to point at the external artifact ` +
+        `(tx hash, settlement ID, signed LOI hash, ClawHub listing URL, etc.). Empty ref rejected.`,
+      );
+    }
+
+    // Anti-gaming guardrails for idea_validated.
+    // Rules:
+    //  - notes must quote both the proposal (PROPOSAL_MSG_ID:) and the
+    //    validator's reply (VALIDATOR_REPLY:) so the entry is auditable.
+    //  - The proposal must have gone out in a PRIOR heartbeat. We enforce
+    //    this by scanning prior ledger entries for a note-type entry with
+    //    category "proposal_sent" whose notes reference the same ID. If no
+    //    matching proposal exists, reject — monet cannot self-validate or
+    //    rush-validate in the same heartbeat.
+    if (event.category === 'idea_validated') {
+      const notes = event.notes ?? '';
+      if (!/PROPOSAL_MSG_ID:\s*\S+/.test(notes) || !/VALIDATOR_REPLY:\s*\S+/.test(notes)) {
+        throw new Error(
+          `idea_validated requires notes to include both "PROPOSAL_MSG_ID: <id>" and ` +
+          `"VALIDATOR_REPLY: <quoted text>" so the chain from proposal → yes-reply is auditable.`,
+        );
+      }
+      const proposalIdMatch = notes.match(/PROPOSAL_MSG_ID:\s*(\S+)/);
+      const proposalId = proposalIdMatch?.[1];
+      const priorEntries = readAllEntries();
+      const matchingProposal = priorEntries.find(
+        (e) => e.type === 'note' &&
+          e.category === 'proposal_sent' &&
+          typeof e.notes === 'string' &&
+          proposalId !== undefined &&
+          e.notes.includes(proposalId),
+      );
+      if (!matchingProposal) {
+        throw new Error(
+          `idea_validated rejected: no prior "proposal_sent" note entry references ` +
+          `PROPOSAL_MSG_ID=${proposalId ?? '?'}. You must log the proposal as a note entry ` +
+          `in the heartbeat where you sent it, and only claim idea_validated in a LATER ` +
+          `heartbeat after Damian/Jenny reply. Same-heartbeat self-validation is forbidden.`,
+        );
+      }
+      const proposalTs = new Date(matchingProposal.ts).getTime();
+      const nowTs = new Date(event.ts).getTime();
+      const MIN_GAP_SECONDS = 60; // proposal and validation must be at least 60s apart
+      if (nowTs - proposalTs < MIN_GAP_SECONDS * 1000) {
+        throw new Error(
+          `idea_validated rejected: proposal was logged <${MIN_GAP_SECONDS}s ago. Human validation ` +
+          `takes real time; same-heartbeat rush-validation is forbidden.`,
+        );
+      }
+    }
+  }
+
   // Budget enforcement for spend entries
   if (event.type === 'spend' && event.amount_cad < 0) {
     const spendAbs = Math.abs(event.amount_cad);
@@ -185,8 +297,9 @@ export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'ent
   fs.appendFileSync(LEDGER_PATH(), fs.readFileSync(tmp, 'utf8'), 'utf8');
   fs.unlinkSync(tmp);
 
-  // Fsync ledger
-  const lfd = fs.openSync(LEDGER_PATH(), 'r+');
+  // Fsync ledger. Must use append mode ('a') because the file may be
+  // chattr +a (append-only) in prod — 'r+' would EPERM.
+  const lfd = fs.openSync(LEDGER_PATH(), 'a');
   fs.fsyncSync(lfd);
   fs.closeSync(lfd);
 

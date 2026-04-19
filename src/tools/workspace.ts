@@ -5,6 +5,24 @@ const WORKSPACE_ROOT = () => path.join(process.env['DATA_DIR'] ?? '/data', 'work
 const MAX_WRITE_BYTES = 512 * 1024; // 512 KB per write
 const MAX_READ_BYTES = 512 * 1024;
 
+// Soul files and live state files that are NOT in workspace/. Monet keeps
+// trying to read/write these through the workspace tools and getting
+// confusing "not found" errors. Redirect explicitly so the mental model
+// gets corrected on the first wrong call.
+const SOUL_FILES_AT_DATA_ROOT = new Set([
+  'SOUL.md', 'IDENTITY.md', 'HEARTBEAT.md', 'TOOLS.md', 'PLAYBOOK.md',
+  'MEMORY.md', 'DECISIONS.md', 'RELATIONSHIPS.md', 'ROSTER.md',
+  'COMMITMENTS.md', 'LEDGER.md', 'SECURITY.md', 'AGENTS.md', 'USER.md',
+  'CONTACTS.md', 'DEPLOY.md',
+]);
+const LIVE_STATE_PATHS: Record<string, string> = {
+  'memory/inbox.md': 'already auto-loaded in your system context on every heartbeat. To reply to a message, call imsg_send. To clear handled items, call inbox_rewrite.',
+  'memory/journal.md': 'past journal entries are cryptographically sealed and unreadable by design. Use journal_read_current_session to see THIS heartbeat\'s buffer.',
+  'memory/journal.md.age': 'journal is encrypted and cannot be decrypted by you. Do not attempt to read it.',
+  'memory/public_log.md': 'public_log is append-only. To add an entry call public_log_append. It is not readable via workspace.',
+  'ledger.jsonl': 'ledger is hash-chained and append-only. To read summarized state check MEMORY.md. To append call ledger_append.',
+};
+
 function resolveInsideWorkspace(relativePath: string): string {
   if (typeof relativePath !== 'string' || relativePath.length === 0) {
     throw new Error('workspace path must be a non-empty string');
@@ -14,6 +32,18 @@ function resolveInsideWorkspace(relativePath: string): string {
   }
   if (relativePath.split(/[\\/]/).some((seg) => seg === '..')) {
     throw new Error('workspace path may not contain ".." segments');
+  }
+  // Helpful redirects for the common mental-model mistakes.
+  const normalized = relativePath.replace(/^\.?\//, '');
+  if (SOUL_FILES_AT_DATA_ROOT.has(normalized)) {
+    throw new Error(
+      `${normalized} is a soul file at /data/${normalized}, NOT in workspace/. ` +
+      `It is already loaded into your system context at the top of every heartbeat — just scroll up. ` +
+      `To UPDATE MEMORY.md specifically, call memory_update(content). Other soul files ship via deploy and cannot be edited in-heartbeat.`,
+    );
+  }
+  if (normalized in LIVE_STATE_PATHS) {
+    throw new Error(`${normalized}: ${LIVE_STATE_PATHS[normalized]}`);
   }
   const root = WORKSPACE_ROOT();
   const resolved = path.resolve(root, relativePath);

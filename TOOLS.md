@@ -29,15 +29,20 @@ Which tool to reach for, when. Not an exhaustive list. When you discover a tool 
 | `public_log_append(text)` | Append to `memory/public_log.md`. Must follow at least one `journal_append` call in the current heartbeat — the tool rejects public log entries in heartbeats where the journal buffer is empty. The in-session journal content itself is not checked; the rule is just that some private thinking preceded the public writing. |
 | `imsg_send(to, text)` | Send a Telegram message to Damian, Jenny, or the group. SEND-ONLY — you cannot read what they send you back. Incoming instructions arrive via `memory/inbox.md` (loaded into your context on every heartbeat). |
 | `inbox_rewrite(content)` | Rewrite `memory/inbox.md` after addressing an instruction. Remove handled items, keep pending ones verbatim. Do this every heartbeat you act on something from the inbox, or you will re-address it forever. |
+| `memory_update(content)` | **The one sanctioned way to rewrite `/data/MEMORY.md`** (the file that crosses the wake gap). Always provide the FULL new file content, not a diff. Max 128KB. Use at end of heartbeat to persist current state + W0.1 moves + infra state. **Do NOT try to reach MEMORY.md via workspace_write/workspace_read — that goes to `/data/workspace/` and is invisible next heartbeat.** Soul files (SOUL.md, HEARTBEAT.md, TOOLS.md, PLAYBOOK.md, etc.) ship via deploy and are not runtime-editable. |
 | `moltbook_post(submolt, title, body)` | Post on Moltbook. The post body is public. Do not paste secrets. |
 | `moltbook_read(submolt, limit)` | Read recent posts from a submolt. Output goes through `quarantine_ingest` automatically. |
 | `healthcheck_ping(status)` | End-of-heartbeat check-in. Call with `"ok"`, `"start"`, or `"fail"`. If you skip this for 40 minutes, Damian gets alerted. |
+| `wallet_address()` | Return your Base mainnet wallet address (Coinbase CDP Server Wallet, MPC-custodied). Safe to share publicly — this is where customers send USDC. First call lazy-creates the wallet. |
+| `wallet_balance()` | Return native ETH (for gas) + USDC balances on Base. Use before proposing to receive payment so you know if you have gas to transact. |
+| `wallet_send_usdc(to, amount_usdc)` | Send USDC on Base. Per-send cap: $5. Daily cap: $20. Every send is auto-logged as a ledger spend. Use only for refunds, paying another agent for a verified service, or on-chain ops Damian has greenlit. |
+| `sandbox_exec(command, timeout_ms)` | **Disposable E2B remote sandbox.** Full internet access, pip/npm/apt available, fresh VM per call, torn down after. 60s default, 300s max. stdout/stderr truncated at 32KB. **This is your real execution environment — use it any time you need to actually run code, not just read it.** Canonical uses: (1) clone a GitHub skill and run the demo before proposing to wrap it, (2) hit an external API end-to-end before proposing a wrapper service, (3) generate concrete demo output to cite in a proposal or public_log entry. NOT for long-running services (the sandbox dies after the call). |
+| `skill_run(install_dir, runtime, entry, args, timeout_ms, stdin)` | Execute an entry file inside an installed skill in a local sandboxed subprocess. No network (inherited from container). No secrets in env. CWD = skill dir. Use when the skill has no external deps and you want fast local execution; otherwise prefer `sandbox_exec`. |
 
 ## Tier-gated
 
 | Tool | Unlocked at | Purpose |
 |---|---|---|
-| `skill_run(install_dir, runtime, entry, args, timeout_ms, stdin)` | Tier 1 | Execute an entry file inside an installed skill in a sandboxed subprocess. No network (inherited from container). No secrets in env. CWD = skill dir. 30s default timeout, 120s max. stdout/stderr truncated at 64KB. Use to test a skill before guiding it, generate demo output to cite, or run the Continuity skill against your own logs. |
 | `agent_wallet_sign(tx)` | Tier 2 | Sign a Coinbase AgentKit transaction. Use only after a fresh, in-heartbeat review of the payload. |
 | `clawtasks_claim(bounty_id)` | Tier 2 | Claim a ClawTasks bounty. Commits a stake you cannot recover if you fail. |
 | `clawhub_publish(skill_dir)` | Tier 3 | Publish a versioned skill to ClawHub. Do not publish skills that contain any logic you don't fully understand. |

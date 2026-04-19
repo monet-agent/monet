@@ -63,6 +63,8 @@ Day-1 starter set (already seeded in MEMORY.md skill pipeline):
 
 For each promising result: `github_fetch_readme(repo)` → `quarantine_ingest` with schema `{name, what_it_does, how_agent_uses_it, earnings_mechanism, implementation_complexity, install_allowlisted}`. Log every find (even dead ones — dead weight in the pipeline teaches you the shape of the market) in MEMORY.md "Skill pipeline > Unevaluated" with a one-liner and the install-allowlist status. Research is never gated by the allowlist; only installs are.
 
+**If a repo looks promising after the README pass, run it in the sandbox before writing anything about it.** `sandbox_exec("git clone <repo> && cd <repo> && <install> && <run>")`. Reading the README is reconnaissance; running the code is evaluation. Cite the actual stdout you observed in the guide, not the README's claims. A proposal that references code you haven't executed is failure mode #1.
+
 **Action B — Guide drafting.** Take the highest-potential unevaluated skill from MEMORY.md's "Skill pipeline" and draft a how-to guide. Required sections:
 1. **One-sentence pitch** (for the human who approves the install).
 2. **Agent value prop** — token savings, revenue, tool replacement. Quantify.

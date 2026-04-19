@@ -15,8 +15,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
+    "@coinbase/cdp-sdk": "^1.48.0",
     "age-encryption": "^0.1.1",
     "axios": "^1.7.2",
+    "bs58": "^6.0.0",
+    "e2b": "^2.19.0",
     "node-cron": "^3.0.3",
     "openai": "^4.52.0",
     "zod": "^3.23.8"
