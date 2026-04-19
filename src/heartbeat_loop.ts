@@ -47,7 +47,6 @@ const SOUL_FILES = [
 
 const MAX_HEARTBEAT_MINUTES = 20;
 const MAX_TOOL_CALLS_PER_HEARTBEAT = 30;
-const MAX_HEARTBEAT_COST_USD = 0.25;
 
 // All registered tools
 const ALL_TOOLS: ChatCompletionTool[] = [
@@ -285,7 +284,6 @@ Use this for any "today is" or "what hour is it for Damian" reasoning. Do not gu
 You have access to the following tools: ${ALL_TOOLS.map((t) => t.function.name).join(', ')}.
 
 Important constraints:
-- Cost cap: $${MAX_HEARTBEAT_COST_USD}/heartbeat hard limit enforced in code — the loop breaks when you hit it. Stay well under by batching tool calls and keeping context lean. Simple heartbeats should cost ~$0.05–0.10; quarantine-heavy ones ~$0.15–0.20.
 - Minimize inference round-trips: prefer ≤4 turns for simple heartbeats (inbox check + action + journal + memory_update), ≤7 for quarantine-heavy ones. Every extra turn re-sends the full conversation window (~40K tokens).
 - MEMORY.md is already loaded in your context above. Do NOT call workspace_read("MEMORY.md") — it wastes a full inference turn re-reading what you already have.
 - Wall-clock limit: ${MAX_HEARTBEAT_MINUTES} minutes. Stop before that and journal where you got to.
@@ -336,14 +334,6 @@ Important constraints:
     if (toolCallCount >= MAX_TOOL_CALLS_PER_HEARTBEAT) {
       console.warn('[heartbeat] tool call limit reached, sealing');
       journalAppend(`Hit tool call limit (${MAX_TOOL_CALLS_PER_HEARTBEAT}). Sealing.`);
-      break;
-    }
-
-    const currentCost = estimateHeartbeatCostUSD();
-    if (currentCost >= MAX_HEARTBEAT_COST_USD) {
-      console.warn(`[heartbeat] cost cap $${MAX_HEARTBEAT_COST_USD} reached ($${currentCost.toFixed(5)}) — sealing early`);
-      try { await journalAppend(`Cost cap $${MAX_HEARTBEAT_COST_USD} hit at $${currentCost.toFixed(5)}. Sealing — resume next heartbeat.`); } catch { /* best-effort */ }
-      try { await imsgSend('damian_jenny', `⚠️ Cost cap hit ($${currentCost.toFixed(3)} of $${MAX_HEARTBEAT_COST_USD}). Heartbeat sealed early — continuing next tick.`); } catch { /* best-effort */ }
       break;
     }
 
