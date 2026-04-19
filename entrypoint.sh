@@ -4,15 +4,41 @@ set -e
 
 DATA_DIR="${DATA_DIR:-/data}"
 
-# ── 1. Sync soul files to persistent volume (first boot only) ────────────
+# ── 1. Sync soul files to persistent volume ──────────────────────────────
+# Stateless config files are ALWAYS overwritten from the image — they're
+# the declared behavior of monet and are source-controlled in git.
+# Stateful files (MEMORY.md, DECISIONS.md, RELATIONSHIPS.md, ROSTER.md,
+# COMMITMENTS.md, LEDGER.md) are only seeded on first boot — monet and
+# Damian edit them in place and their content is the running state.
+STATEFUL_FILES="MEMORY.md DECISIONS.md RELATIONSHIPS.md ROSTER.md COMMITMENTS.md LEDGER.md"
+
+is_stateful() {
+  case " $STATEFUL_FILES " in
+    *" $1 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 for f in /app/soul_files/*.md; do
   fname=$(basename "$f")
   dest="${DATA_DIR}/${fname}"
-  if [ ! -f "$dest" ]; then
+  if is_stateful "$fname"; then
+    if [ ! -f "$dest" ]; then
+      cp "$f" "$dest"
+      echo "[entrypoint] seeded stateful ${fname}"
+    fi
+  else
     cp "$f" "$dest"
-    echo "[entrypoint] seeded ${fname}"
+    echo "[entrypoint] synced ${fname}"
   fi
 done
+
+# Ensure inbox.md exists so heartbeat loader doesn't skip it silently.
+if [ ! -f "${DATA_DIR}/memory/inbox.md" ]; then
+  mkdir -p "${DATA_DIR}/memory"
+  printf '# Inbox — messages from Damian to mon€t\n\nAppend new instructions to the bottom of this file. Each entry should start with a timestamp line (`## <ISO timestamp> — from Damian`) and end with `---`.\n\nAfter mon€t has addressed an entry, it should rewrite the file to remove handled items, keeping only un-addressed instructions.\n\n_(No pending instructions.)_\n' > "${DATA_DIR}/memory/inbox.md"
+  echo "[entrypoint] seeded memory/inbox.md"
+fi
 
 # Seed memory directory (don't overwrite if volume already has entries)
 if [ ! -f "${DATA_DIR}/memory/journal.md" ]; then

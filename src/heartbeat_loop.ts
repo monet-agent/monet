@@ -29,6 +29,7 @@ import { skillInstall, skillList, skillInstallTools } from './tools/skill_instal
 import { skillRun, skillRunTools } from './tools/skill_run.js';
 import { webFetch, webTools } from './tools/web.js';
 import { kimiBuiltinTools, isKimiBuiltin, dispatchKimiBuiltin } from './tools/kimi_builtins.js';
+import { inboxRewrite, inboxTools } from './tools/inbox.js';
 import { isLedgerReadOnly } from './verifier_push.js';
 import { verifyJournalChain } from './tools/journal.js';
 
@@ -60,6 +61,7 @@ const ALL_TOOLS: ChatCompletionTool[] = [
   ...skillRunTools,
   ...webTools,
   ...kimiBuiltinTools,
+  ...inboxTools,
 ];
 
 function loadSoulContext(): string {
@@ -77,6 +79,15 @@ function loadSoulContext(): string {
     const recent = lines.slice(-50).join('\n');
     parts.push(`\n\n# LEDGER (last 50 entries)\n\n${recent}`);
   }
+  // Inbox — messages from Damian since the last heartbeat. Loaded FIRST
+  // after soul files so it's prominent in the context and monet reads
+  // instructions before defaulting to the playbook.
+  const inboxPath = path.join(DATA_DIR, 'memory/inbox.md');
+  if (fs.existsSync(inboxPath)) {
+    const inbox = fs.readFileSync(inboxPath, 'utf8');
+    parts.push(`\n\n# FILE: memory/inbox.md (messages from Damian — address these before falling back to PLAYBOOK)\n\n${inbox}`);
+  }
+
   // Recent heartbeat telemetry — lets the agent see its own token burn trend.
   const telemetryPath = path.join(DATA_DIR, 'memory/heartbeat_telemetry.md');
   if (fs.existsSync(telemetryPath)) {
@@ -166,6 +177,8 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
       );
     case 'web_fetch':
       return webFetch(args['url'] as string);
+    case 'inbox_rewrite':
+      return inboxRewrite(args['content'] as string);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

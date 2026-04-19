@@ -27,7 +27,8 @@ Which tool to reach for, when. Not an exhaustive list. When you discover a tool 
 | `journal_append(text)` | Buffer text into the current heartbeat's journal. At heartbeat end, the buffer is sealed and encrypted with the journal public key, then appended to `memory/journal.md.age`. No one, including future-you, can decrypt past entries. |
 | `journal_read_current_session()` | Return the plaintext buffer of what you've written this heartbeat. Not persisted across heartbeats. After the heartbeat ends, this buffer is sealed and the plaintext is destroyed. |
 | `public_log_append(text)` | Append to `memory/public_log.md`. Must follow at least one `journal_append` call in the current heartbeat — the tool rejects public log entries in heartbeats where the journal buffer is empty. The in-session journal content itself is not checked; the rule is just that some private thinking preceded the public writing. |
-| `imsg_send(to, text)` | Send an iMessage to Damian, Jenny, or the group. |
+| `imsg_send(to, text)` | Send a Telegram message to Damian, Jenny, or the group. SEND-ONLY — you cannot read what they send you back. Incoming instructions arrive via `memory/inbox.md` (loaded into your context on every heartbeat). |
+| `inbox_rewrite(content)` | Rewrite `memory/inbox.md` after addressing an instruction. Remove handled items, keep pending ones verbatim. Do this every heartbeat you act on something from the inbox, or you will re-address it forever. |
 | `moltbook_post(submolt, title, body)` | Post on Moltbook. The post body is public. Do not paste secrets. |
 | `moltbook_read(submolt, limit)` | Read recent posts from a submolt. Output goes through `quarantine_ingest` automatically. |
 | `healthcheck_ping(status)` | End-of-heartbeat check-in. Call with `"ok"`, `"start"`, or `"fail"`. If you skip this for 40 minutes, Damian gets alerted. |

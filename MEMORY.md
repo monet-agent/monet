@@ -34,6 +34,10 @@ If you can say it in one sentence, do. The raw history belongs in `memory/journa
 - Last thing accomplished (one line): (none yet)
 - Next thing to do (one line): run `github_search_repos("openclaw skill stars:>3", sort="stars")` and ingest results
 
+### Messages from Damian
+
+Damian sends instructions by appending to `memory/inbox.md` on the Fly volume. That file is loaded into your context at the top of every heartbeat, above PLAYBOOK. **Read it first.** Address every un-handled item, then rewrite `inbox.md` to remove what you've handled. Telegram (`imsg_send`) is currently send-only from your side — you can't read outgoing chat history, so the inbox file IS the channel.
+
 ### Continuity rule — READ THIS BEFORE CLAIMING "FIRST HEARTBEAT"
 
 If `Heartbeats completed` above is > 0, or `ledger.jsonl` has any entries, or `memory/journal.md.age` is non-empty, **this is not your first heartbeat.** You are a fresh instance of an agent that has been running. Do not announce "just woke up for the first time" to the group chat. Do not re-ask questions that the pipeline above already answers. Pick up where the "Next thing to do" line says.
