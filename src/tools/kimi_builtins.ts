@@ -19,19 +19,15 @@
 // builtin_function, so we erase the type before exporting.
 type BuiltinTool = { type: 'builtin_function'; function: { name: string } };
 
+// ONLY tools that Moonshot accepts as builtin_function go here.
+// Anything unverified gets a 400 "unexpected builtin function: $x" that
+// fails the whole request — there's no per-tool skipping on their end.
+//
+// Verified so far: $web_search (dedicated doc page at
+// platform.kimi.ai/docs/guide/use-web-search). Add others one at a
+// time after confirming they return 200.
 const BUILTIN_NAMES = [
-  '$web_search',    // Moonshot-hosted web search
-  '$fetch',         // Fetch a URL, return cleaned text
-  '$code_runner',   // Hosted Python sandbox
-  '$quickjs',       // Hosted JS sandbox (quickjs)
-  '$memory',        // Scratchpad memory (per-conversation)
-  '$date',          // Current date / date math
-  '$convert',       // Unit / currency conversion
-  '$excel',         // Spreadsheet ops
-  '$base64',        // Encode / decode
-  '$rethink',       // Self-reflection helper
-  '$random-choice', // Weighted random pick
-  '$mew',           // Moonshot novelty tool (keep to see if model reaches for it)
+  '$web_search',
 ] as const;
 
 export type KimiBuiltinName = (typeof BUILTIN_NAMES)[number];
