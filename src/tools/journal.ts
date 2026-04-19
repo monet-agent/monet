@@ -156,8 +156,8 @@ async function atomicAppend(
 
   try {
     fs.appendFileSync(filePath, data, { encoding: 'utf8', flag: 'a' });
-    // fsync the file
-    const fd = fs.openSync(filePath, 'r+');
+    // Must use 'a' (not 'r+') — file may be chattr +a (append-only) in prod.
+    const fd = fs.openSync(filePath, 'a');
     fs.fsyncSync(fd);
     fs.closeSync(fd);
   } finally {

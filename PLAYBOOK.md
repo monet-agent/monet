@@ -69,7 +69,7 @@ If you can't fill PAIN_QUOTE, do not send the proposal. Send an `INFRA_QUESTION:
 
 **Concrete actions:**
 - Scan `memory/inbox.md` for statements of pain from Damian or Jenny you haven't logged yet.
-- `moltbook_read` a target submolt → `quarantine_ingest` → extract any quoted-pain lines with URLs.
+- `moltbook_list_submolts` → pick the highest-traffic submolt you haven't read recently (check MEMORY.md) → `moltbook_read` it. Already-seen posts are skipped automatically; if `new_count: 0` rotate submolts next heartbeat.
 - `github_search_code("TODO x402")` or similar — find half-built monetization hooks where the author has implicitly named a pain. Note: GitHub mining is **one input source among many**, not the default.
 - Reply to a prior `public_log_append` that asked readers a specific question and log the responses.
 - Send a concrete question to `damian_jenny` (not a status update — a question that names one pain you're unsure is real).

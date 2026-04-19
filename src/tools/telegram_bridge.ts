@@ -13,7 +13,7 @@ const DATA_DIR = (): string => process.env['DATA_DIR'] ?? '/data';
 const INBOX_PATH = (): string => path.join(DATA_DIR(), 'memory/inbox.md');
 const OFFSET_PATH = (): string => path.join(DATA_DIR(), 'memory/.telegram_offset');
 
-interface TgMessage {
+export interface TgMessage {
   update_id: number;
   message?: {
     message_id: number;
@@ -74,6 +74,8 @@ export async function pollTelegramInbox(): Promise<number> {
     return 0;
   }
 
+  console.log(`[telegram] poll: ${updates.length} update(s) since offset ${offset}`);
+
   if (updates.length === 0) return 0;
 
   const knownChats = [
@@ -88,14 +90,13 @@ export async function pollTelegramInbox(): Promise<number> {
     maxOffset = Math.max(maxOffset, u.update_id);
     if (!u.message?.text) continue;
     const chatId = String(u.message.chat.id);
-    // Drop messages from unknown chats. Prevents random people who DM
-    // the bot from injecting instructions into monet's context.
     if (!knownChats.includes(chatId)) {
-      console.warn(`[telegram] dropped message from unknown chat ${chatId}`);
+      console.warn(`[telegram] dropped update ${u.update_id} from unknown chat ${chatId} — text: "${u.message.text.slice(0, 60)}"`);
       continue;
     }
     const sender = resolveSenderLabel(u.message.chat.id, u.message.from);
     const iso = new Date(u.message.date * 1000).toISOString();
+    console.log(`[telegram] accepted update ${u.update_id} from ${sender}: "${u.message.text.slice(0, 60)}"`);
     entries.push(`## ${iso} — from ${sender}\n\n${u.message.text.trim()}\n\n---\n`);
   }
 
@@ -109,18 +110,54 @@ export async function pollTelegramInbox(): Promise<number> {
 
   if (entries.length === 0) return 0;
 
+  appendToInbox(entries.join('\n'));
+  return entries.length;
+}
+
+function appendToInbox(entry: string): void {
   const inboxPath = INBOX_PATH();
   fs.mkdirSync(path.dirname(inboxPath), { recursive: true });
   const existing = fs.existsSync(inboxPath) ? fs.readFileSync(inboxPath, 'utf8') : '';
-  // If the existing file is just the empty-state template, replace it;
-  // otherwise append.
   const emptyMarker = '_(No pending instructions.)_';
   const base = existing.includes(emptyMarker)
     ? existing.replace(emptyMarker, '').trimEnd() + '\n'
     : existing.trimEnd() + '\n\n';
-  fs.writeFileSync(inboxPath, base + entries.join('\n'), 'utf8');
+  fs.writeFileSync(inboxPath, base + entry, 'utf8');
+}
 
-  return entries.length;
+// Process a single Telegram update synchronously (used by webhook handler).
+// Returns true if the message was accepted and written to inbox.
+export function ingestTelegramUpdate(u: TgMessage): boolean {
+  if (!u.message?.text) return false;
+
+  const knownChats = [
+    process.env['TELEGRAM_CHAT_ID_DAMIAN'],
+    process.env['TELEGRAM_CHAT_ID_JENNY'],
+    process.env['TELEGRAM_CHAT_ID_GROUP'],
+  ].filter((x): x is string => Boolean(x));
+
+  const chatId = String(u.message.chat.id);
+  if (!knownChats.includes(chatId)) {
+    console.warn(`[telegram/webhook] dropped update ${u.update_id} from unknown chat ${chatId}`);
+    return false;
+  }
+
+  const sender = resolveSenderLabel(u.message.chat.id, u.message.from);
+  const iso = new Date(u.message.date * 1000).toISOString();
+  console.log(`[telegram/webhook] accepted update ${u.update_id} from ${sender}: "${u.message.text.slice(0, 60)}"`);
+
+  // Advance offset so the next cron poll doesn't replay this update.
+  try {
+    const current = fs.existsSync(OFFSET_PATH())
+      ? parseInt(fs.readFileSync(OFFSET_PATH(), 'utf8').trim(), 10) || 0
+      : 0;
+    if (u.update_id > current) {
+      fs.writeFileSync(OFFSET_PATH(), String(u.update_id), 'utf8');
+    }
+  } catch { /* non-fatal */ }
+
+  appendToInbox(`## ${iso} — from ${sender}\n\n${u.message.text.trim()}\n\n---\n`);
+  return true;
 }
 
 function resolveChatId(to: Recipient): string {

@@ -9,7 +9,7 @@ import { publicLogAppend, publicLogTools } from './tools/public_log.js';
 import { healthcheckPing, healthcheckTools } from './tools/healthcheck.js';
 import { verifyCitation, citationTools } from './tools/verify_citation.js';
 import { quarantineIngest, quarantineTools } from './tools/quarantine.js';
-import { moltbookRead, moltbookPost, moltbookTools } from './tools/moltbook.js';
+import { moltbookRead, moltbookPost, moltbookListSubmolts, moltbookTools } from './tools/moltbook.js';
 import { imsgSend, pollTelegramInbox, telegramTools } from './tools/telegram_bridge.js';
 import {
   workspaceWrite,
@@ -124,6 +124,8 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
         args['content'] as string,
         args['schema'] as Record<string, unknown>,
       );
+    case 'moltbook_list_submolts':
+      return moltbookListSubmolts();
     case 'moltbook_read':
       return moltbookRead(args['submolt'] as string, args['limit'] as number | undefined);
     case 'moltbook_post':

@@ -27,6 +27,17 @@ kill_timeout = '30s'
   size = 'shared-cpu-1x'
   memory = '1gb'
 
+[http_service]
+  internal_port = 8088
+  force_https = true
+  auto_stop_machines = false
+  min_machines_running = 1
+  processes = ['app']
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 25
+    soft_limit = 20
+
 [[metrics]]
   port = 9091
   path = '/metrics'
