@@ -126,6 +126,9 @@ setup_iptables() {
     e2b.dev
     api.cdp.coinbase.com
     mainnet.base.org
+    api.machines.dev
+    api.fly.io
+    registry.fly.io
   "
 
   for domain in $ALLOWED_DOMAINS; do

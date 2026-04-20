@@ -24,6 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       curl \
     && rm -rf /var/lib/apt/lists/*
 
+# flyctl binary — used by fly_mvp tools for autonomous MVP deploys to the
+# pre-provisioned app pool (monet-mvp-01..NN). Token scoping is per-app so
+# this flyctl install can only act on slots listed in FLY_MVP_TOKENS.
+RUN curl -fsSL https://fly.io/install.sh | FLYCTL_INSTALL=/usr/local sh && \
+    /usr/local/bin/flyctl version
+
 # node:24-slim already has node user at uid/gid 1000 — rename it to monet
 RUN usermod -l monet node && groupmod -n monet node
 

@@ -44,6 +44,13 @@ import { inboxRewrite, inboxTools } from './tools/inbox.js';
 import { sandboxExec, sandboxTools } from './tools/sandbox.js';
 import { walletAddress, walletBalance, walletSendUsdc, walletCheckIncoming, walletTools } from './tools/wallet.js';
 import { memoryUpdate, memoryTools } from './tools/memory.js';
+import {
+  flyListMvpSlots,
+  flyDeployMvp,
+  flyMvpStatus,
+  flyMvpDestroy,
+  flyMvpTools,
+} from './tools/fly_mvp.js';
 import { isLedgerReadOnly } from './verifier_push.js';
 import { verifyJournalChain } from './tools/journal.js';
 
@@ -91,6 +98,7 @@ const ALL_TOOLS: ChatCompletionTool[] = [
   ...sandboxTools,
   ...walletTools,
   ...memoryTools,
+  ...flyMvpTools,
 ];
 
 // Returns true when the file is just section headers + placeholder markers
@@ -296,6 +304,21 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
       return walletCheckIncoming((args['since_hours'] as number | undefined) ?? 48);
     case 'memory_update':
       return memoryUpdate(args['content'] as string);
+    case 'fly_list_mvp_slots':
+      return flyListMvpSlots();
+    case 'fly_deploy_mvp':
+      return flyDeployMvp(
+        args['slot'] as string,
+        args['workspace_path'] as string,
+        {
+          internal_port: args['internal_port'] as number | undefined,
+          mvp_name: args['mvp_name'] as string | undefined,
+        },
+      );
+    case 'fly_mvp_status':
+      return flyMvpStatus(args['slot'] as string);
+    case 'fly_mvp_destroy':
+      return flyMvpDestroy(args['slot'] as string);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

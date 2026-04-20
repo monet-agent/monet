@@ -43,6 +43,10 @@ Which tool to reach for, when. Not an exhaustive list. When you discover a tool 
 | `sandbox_exec(command, timeout_ms)` | **Disposable E2B remote sandbox.** Full internet access, pip/npm/apt available, fresh VM per call, torn down after. 60s default, 300s max. stdout/stderr truncated at 32KB. **This is your real execution environment — use it any time you need to actually run code, not just read it.** Canonical uses: (1) clone a GitHub skill and run the demo before proposing to wrap it, (2) hit an external API end-to-end before proposing a wrapper service, (3) generate concrete demo output to cite in a proposal or public_log entry. NOT for long-running services (the sandbox dies after the call). |
 | `skill_run(install_dir, runtime, entry, args, timeout_ms, stdin)` | **Always available.** Execute an entry file inside an installed skill in a local sandboxed subprocess. No network (inherited from container). No secrets in env. CWD = skill dir. Use when the skill has no external deps and you want fast local execution; otherwise prefer `sandbox_exec`. |
 | `wallet_address()` / `wallet_balance()` / `wallet_send_usdc(to, amount_usdc)` | **Always available.** Receive-always; `wallet_send_usdc` is capped at $5/send and $20/day. |
+| `fly_list_mvp_slots()` | List the pre-provisioned Fly app slots (`monet-mvp-01..NN`) available for autonomous MVP deploys. Returns per-slot machine count, started state, hostname (`<slot>.fly.dev`), and 24h deploy-cap usage. **Call this first** before deploying so you know which slots are free. |
+| `fly_deploy_mvp(slot, workspace_path, internal_port?, mvp_name?)` | Deploy an MVP from `workspace/<path>` to a pooled slot. Requires `workspace/<path>/Dockerfile`. If no `fly.toml`, one is auto-written (region yyz, default port 8080, shared-cpu-1x/256mb). Each deploy appends an `mvp_deploy` ledger note and counts toward the 24h cap. Tokens are per-slot — you never see them; you just name the slot. |
+| `fly_mvp_status(slot)` | Inspect a slot: machine list (id/state/region/image), hostname, and live HTTP reachability check. **Use after every deploy** to confirm the MVP is actually live before claiming `endpoint_live`. A deploy that built but 502s does not earn. |
+| `fly_mvp_destroy(slot)` | Scale a slot to 0 machines. Keeps the slot in the pool for later redeploys — does NOT delete the app. Use when an MVP has failed validation or you're rotating out a dead experiment. |
 
 ## Autonomous revenue loop (no manual DMs required)
 
@@ -58,6 +62,19 @@ Skills written to `workspace/` are on a private Fly volume — invisible to cust
 7. `ledger_append(revenue_received, amount_cad=4.11, verification={type:"onchain", ref: tx_hash})`
 
 This loop is fully autonomous — Damian does not need to relay payment confirmations.
+
+## Autonomous MVP deploy loop (live endpoint → paid customer)
+
+For MVPs that need a live HTTP endpoint (not just a GitHub repo), use the `fly_*` tools. You have a pre-provisioned pool of 3 Fly app slots with per-app deploy tokens — you reference slots by name, never see the tokens. Daily cap: 10 deploys/24h across all slots.
+
+1. `fly_list_mvp_slots` → see which slots are free (machine_count=0 → idle; any_started=true → already running something).
+2. `workspace_write` → write `workspace/<mvp-name>/Dockerfile` and `workspace/<mvp-name>/<your source files>`. Keep it small — a single-file Python Flask/Node Express server is enough for v1. Expose port 8080 by default (or pass `internal_port` on deploy).
+3. `fly_deploy_mvp(slot="monet-mvp-01", workspace_path="<mvp-name>", mvp_name="<mvp-name>")` → builds + deploys via Fly remote builder. Blocks up to 5 min. Returns `{ok, hostname, logs_tail}`.
+4. `fly_mvp_status(slot)` → confirms a machine is `started` and that `https://<slot>.fly.dev/` returns < 500. **Do not claim `endpoint_live` unless `reachable: true` and `http_status < 500` in the status result.**
+5. Use `verification.ref = "https://<slot>.fly.dev/"` with `verifier_tool = "fly_mvp_status"` when logging `endpoint_live`. That's what makes it a Tier B earn, not a self-claim.
+6. `fly_mvp_destroy(slot)` → scale to 0 if the experiment fails or once you've moved on. Frees the slot without deleting it from the pool.
+
+This loop is the bridge from "validated proposal" → "live endpoint with a URL a customer can hit." It does NOT bypass the proposal → validation → build flow — deploy only MVPs that back a validated proposal.
 
 ## Tier-gated (internal plumbing — never mentioned outbound)
 
