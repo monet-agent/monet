@@ -21,6 +21,46 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
+async function postJson(url: string, body: unknown, timeoutMs = 15_000): Promise<unknown> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`GitHub ${res.status}: ${text.slice(0, 500)}`);
+    }
+    return JSON.parse(await res.text());
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function putJson(url: string, body: unknown, timeoutMs = 15_000): Promise<unknown> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`GitHub ${res.status}: ${text.slice(0, 500)}`);
+    }
+    return JSON.parse(await res.text());
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 async function fetchJson(url: string, timeoutMs = 15_000): Promise<unknown> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -79,6 +119,67 @@ function summarizeRepo(r: Record<string, unknown>): RepoSummary {
     topics: Array.isArray(r['topics']) ? (r['topics'] as string[]) : [],
     pushed_at: String(r['pushed_at'] ?? ''),
     license: (r['license'] as { spdx_id?: string } | null)?.spdx_id ?? null,
+  };
+}
+
+export async function githubCreateRepo(
+  name: string,
+  description: string = '',
+  isPrivate: boolean = false,
+): Promise<{ owner: string; repo: string; html_url: string; clone_url: string }> {
+  if (!name || typeof name !== 'string') throw new Error('name required');
+  const tok = process.env['GITHUB_TOKEN'];
+  if (!tok) throw new Error('GITHUB_TOKEN not set — cannot create repos');
+  const j = (await postJson(`${GITHUB_API}/user/repos`, {
+    name,
+    description,
+    private: isPrivate,
+    auto_init: true,
+  })) as { full_name: string; html_url: string; clone_url: string };
+  const owner = j.full_name.split('/')[0] ?? '';
+  return { owner, repo: name, html_url: j.html_url, clone_url: j.clone_url };
+}
+
+export async function githubPushFile(
+  ownerRepo: string,
+  filePath: string,
+  content: string,
+  commitMessage: string,
+  branch: string = 'main',
+): Promise<{ html_url: string; commit_sha: string }> {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(ownerRepo)) {
+    throw new Error('ownerRepo must be "owner/repo"');
+  }
+  if (filePath.includes('..')) throw new Error('path may not contain ".."');
+  const tok = process.env['GITHUB_TOKEN'];
+  if (!tok) throw new Error('GITHUB_TOKEN not set — cannot push files');
+
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const contentsUrl = `${GITHUB_API}/repos/${ownerRepo}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`;
+
+  let existingSha: string | undefined;
+  try {
+    const existing = (await fetchJson(contentsUrl)) as { sha?: string };
+    existingSha = existing.sha;
+  } catch {
+    // 404 = new file, no sha needed
+  }
+
+  const putBody: Record<string, unknown> = {
+    message: commitMessage,
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    branch,
+  };
+  if (existingSha) putBody['sha'] = existingSha;
+
+  const r = (await putJson(
+    `${GITHUB_API}/repos/${ownerRepo}/contents/${encodedPath}`,
+    putBody,
+  )) as { content?: { html_url?: string }; commit?: { sha?: string } };
+
+  return {
+    html_url: r.content?.html_url ?? '',
+    commit_sha: r.commit?.sha ?? '',
   };
 }
 
@@ -178,6 +279,42 @@ export async function githubTrending(
 }
 
 export const githubTools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'github_create_repo',
+      description:
+        'Create a public GitHub repo under the authenticated account. Use to publish workspace skills so they are reachable externally. Returns html_url and clone_url.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Repo name (no spaces, kebab-case recommended).' },
+          description: { type: 'string', description: 'Short repo description.' },
+          private: { type: 'boolean', description: 'Set true for private repo. Default false (public).' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'github_push_file',
+      description:
+        'Create or update a single file in a GitHub repo. Content is the raw string — tool handles base64 encoding. For multi-file skills, call once per file. Returns the file html_url.',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner_repo: { type: 'string', description: '"owner/repo", e.g. "monet-agent/my-skill".' },
+          path: { type: 'string', description: 'File path within the repo, e.g. "README.md" or "src/index.ts".' },
+          content: { type: 'string', description: 'Raw file content (UTF-8 string). Tool base64-encodes it.' },
+          commit_message: { type: 'string', description: 'Commit message.' },
+          branch: { type: 'string', description: 'Target branch. Default "main".' },
+        },
+        required: ['owner_repo', 'path', 'content', 'commit_message'],
+      },
+    },
+  },
   {
     type: 'function' as const,
     function: {

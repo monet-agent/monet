@@ -23,6 +23,8 @@ import {
   githubFetchReadme,
   githubFetchFile,
   githubTrending,
+  githubCreateRepo,
+  githubPushFile,
   githubTools,
 } from './tools/github.js';
 import { skillInstall, skillList, skillInstallTools } from './tools/skill_install.js';
@@ -31,7 +33,7 @@ import { webFetch, webTools } from './tools/web.js';
 import { kimiBuiltinTools, isKimiBuiltin, dispatchKimiBuiltin } from './tools/kimi_builtins.js';
 import { inboxRewrite, inboxTools } from './tools/inbox.js';
 import { sandboxExec, sandboxTools } from './tools/sandbox.js';
-import { walletAddress, walletBalance, walletSendUsdc, walletTools } from './tools/wallet.js';
+import { walletAddress, walletBalance, walletSendUsdc, walletCheckIncoming, walletTools } from './tools/wallet.js';
 import { memoryUpdate, memoryTools } from './tools/memory.js';
 import { isLedgerReadOnly } from './verifier_push.js';
 import { verifyJournalChain } from './tools/journal.js';
@@ -170,6 +172,20 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
         (args['sinceDays'] as number | undefined) ?? 30,
         (args['limit'] as number | undefined) ?? 10,
       );
+    case 'github_create_repo':
+      return githubCreateRepo(
+        args['name'] as string,
+        (args['description'] as string | undefined) ?? '',
+        (args['private'] as boolean | undefined) ?? false,
+      );
+    case 'github_push_file':
+      return githubPushFile(
+        args['owner_repo'] as string,
+        args['path'] as string,
+        args['content'] as string,
+        args['commit_message'] as string,
+        (args['branch'] as string | undefined) ?? 'main',
+      );
     case 'skill_install':
       return skillInstall(args['repo'] as string, args['sha'] as string);
     case 'skill_list':
@@ -198,6 +214,8 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
       return walletBalance();
     case 'wallet_send_usdc':
       return walletSendUsdc(args['to'] as string, args['amount_usdc'] as number);
+    case 'wallet_check_incoming':
+      return walletCheckIncoming((args['since_hours'] as number | undefined) ?? 48);
     case 'memory_update':
       return memoryUpdate(args['content'] as string);
     default:

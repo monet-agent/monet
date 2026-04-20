@@ -188,6 +188,94 @@ export async function walletSendUsdc(to: string, amountUsdc: number): Promise<{
   return { tx_hash: txHash, to, amount_usdc: amountUsdc, daily_used_usdc: state.sent_usdc_today };
 }
 
+const BASE_RPC = 'https://mainnet.base.org';
+const USDC_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+const BLOCKS_PER_HOUR = 1800;
+
+interface WalletIncomingState {
+  last_incoming_block: number;
+}
+
+function readIncomingState(): WalletIncomingState | null {
+  if (!fs.existsSync(WALLET_STATE_PATH())) return null;
+  try {
+    const s = JSON.parse(fs.readFileSync(WALLET_STATE_PATH(), 'utf8')) as WalletDailyState & WalletIncomingState;
+    if (typeof s.last_incoming_block === 'number') return { last_incoming_block: s.last_incoming_block };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeIncomingState(block: number): void {
+  let existing: Record<string, unknown> = {};
+  if (fs.existsSync(WALLET_STATE_PATH())) {
+    try {
+      existing = JSON.parse(fs.readFileSync(WALLET_STATE_PATH(), 'utf8')) as Record<string, unknown>;
+    } catch { /* ignore */ }
+  }
+  existing['last_incoming_block'] = block;
+  fs.mkdirSync(path.dirname(WALLET_STATE_PATH()), { recursive: true });
+  fs.writeFileSync(WALLET_STATE_PATH(), JSON.stringify(existing, null, 2), 'utf8');
+}
+
+async function baseRpc(method: string, params: unknown[]): Promise<unknown> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 20_000);
+  try {
+    const res = await fetch(BASE_RPC, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Base RPC HTTP ${res.status}`);
+    const j = (await res.json()) as { result?: unknown; error?: { message?: string } };
+    if (j.error) throw new Error(`Base RPC error: ${j.error.message ?? JSON.stringify(j.error)}`);
+    return j.result;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function walletCheckIncoming(sinceHours: number = 48): Promise<{
+  payments: Array<{ tx_hash: string; from: string; amount_usdc: number; block_number: number }>;
+  new_count: number;
+  checked_to_block: number;
+}> {
+  const { record } = await ensureAccount();
+  const monetAddress = record.address.toLowerCase();
+
+  const latestHex = (await baseRpc('eth_blockNumber', [])) as string;
+  const latestBlock = parseInt(latestHex, 16);
+
+  const incomingState = readIncomingState();
+  const fromBlock = incomingState
+    ? incomingState.last_incoming_block
+    : Math.max(0, latestBlock - Math.ceil(sinceHours * BLOCKS_PER_HOUR));
+
+  const paddedAddress = '0x000000000000000000000000' + monetAddress.slice(2);
+  const logs = (await baseRpc('eth_getLogs', [
+    {
+      address: USDC_BASE_MAINNET,
+      topics: [USDC_TRANSFER_TOPIC, null, paddedAddress],
+      fromBlock: '0x' + fromBlock.toString(16),
+      toBlock: '0x' + latestBlock.toString(16),
+    },
+  ])) as Array<{ transactionHash: string; topics: string[]; data: string; blockNumber: string }>;
+
+  const payments = logs.map((log) => ({
+    tx_hash: log.transactionHash,
+    from: '0x' + log.topics[1]!.slice(26),
+    amount_usdc: Number(BigInt(log.data)) / 1_000_000,
+    block_number: parseInt(log.blockNumber, 16),
+  }));
+
+  writeIncomingState(latestBlock + 1);
+
+  return { payments, new_count: payments.length, checked_to_block: latestBlock };
+}
+
 export const walletTools = [
   {
     type: 'function' as const,
@@ -205,6 +293,24 @@ export const walletTools = [
       description:
         'Return current token balances for monet\'s Base wallet. Includes native ETH (for gas) and USDC. Use before proposing to receive payment so you know if you have gas to transact.',
       parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'wallet_check_incoming',
+      description:
+        'Check Base mainnet for incoming USDC transfers to monet\'s address since last call. Returns tx_hash for each payment — use as verification.ref when logging revenue_received. Call at the start of each heartbeat after inbox check. No new secrets needed — uses the public Base JSON-RPC endpoint.',
+      parameters: {
+        type: 'object',
+        properties: {
+          since_hours: {
+            type: 'number',
+            description: 'On first call (no saved checkpoint), how many hours back to scan. Default 48.',
+          },
+        },
+        required: [],
+      },
     },
   },
   {
