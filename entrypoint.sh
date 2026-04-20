@@ -102,6 +102,7 @@ setup_iptables() {
     api.e2b.dev
     e2b.dev
     api.cdp.coinbase.com
+    mainnet.base.org
   "
 
   for domain in $ALLOWED_DOMAINS; do
