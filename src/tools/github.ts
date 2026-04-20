@@ -128,9 +128,12 @@ export async function githubCreateRepo(
   isPrivate: boolean = false,
 ): Promise<{ owner: string; repo: string; html_url: string; clone_url: string }> {
   if (!name || typeof name !== 'string') throw new Error('name required');
-  const tok = process.env['GITHUB_TOKEN'];
-  if (!tok) throw new Error('GITHUB_TOKEN not set — cannot create repos');
-  const j = (await postJson(`${GITHUB_API}/user/repos`, {
+  if (!process.env['GITHUB_TOKEN']) throw new Error('GITHUB_TOKEN not set — cannot create repos');
+  const org = process.env['GITHUB_ORG'];
+  const endpoint = org
+    ? `${GITHUB_API}/orgs/${encodeURIComponent(org)}/repos`
+    : `${GITHUB_API}/user/repos`;
+  const j = (await postJson(endpoint, {
     name,
     description,
     private: isPrivate,
@@ -284,7 +287,7 @@ export const githubTools = [
     function: {
       name: 'github_create_repo',
       description:
-        'Create a public GitHub repo under the authenticated account. Use to publish workspace skills so they are reachable externally. Returns html_url and clone_url.',
+        'Create a GitHub repo under the monet org (GITHUB_ORG env), or under the authenticated user if no org is set. Use to publish workspace skills so they are reachable externally. Returns html_url and clone_url.',
       parameters: {
         type: 'object',
         properties: {
