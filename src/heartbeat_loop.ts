@@ -25,6 +25,7 @@ import {
   githubTrending,
   githubCreateRepo,
   githubPushFile,
+  githubListCommits,
   githubTools,
 } from './tools/github.js';
 import { skillInstall, skillList, skillInstallTools } from './tools/skill_install.js';
@@ -170,6 +171,12 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
       return githubTrending(
         args['topic'] as string,
         (args['sinceDays'] as number | undefined) ?? 30,
+        (args['limit'] as number | undefined) ?? 10,
+      );
+    case 'github_list_commits':
+      return githubListCommits(
+        args['repo'] as string,
+        args['since'] as string | undefined,
         (args['limit'] as number | undefined) ?? 10,
       );
     case 'github_create_repo':

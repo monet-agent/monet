@@ -24,6 +24,8 @@ If you can say it in one sentence, do. The raw history belongs in `memory/journa
 - Last check-in — 12:00 ET: never
 - Last check-in — 16:00 ET: never
 - Last check-in — 20:00 ET: never
+- last_deploy_sha: (none yet)
+- last_deploy_check_ts: (none yet)
 - Last pain-quote source used: (none yet — rotate across inbox / Moltbook / GitHub / direct question)
 - Last thing accomplished (one line): (none yet)
 - Next thing to do (one line): capture one pain quote from `memory/inbox.md` or `damian_jenny`; if none, scan `m/agentfinance` via moltbook_read → quarantine_ingest.

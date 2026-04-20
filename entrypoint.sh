@@ -36,6 +36,29 @@ for f in /app/soul_files/*.md; do
   fi
 done
 
+# ── 1b. Fetch fresh soul files from GitHub (post-image override) ──────────
+# Non-stateful soul files can be updated by pushing to GitHub and restarting
+# the machine — no redeploy needed. Stateful files are never fetched.
+SOUL_REPO="${SOUL_REPO:-monet-agent/monet}"
+RAW_BASE="https://raw.githubusercontent.com/${SOUL_REPO}/main"
+FETCH_TIMEOUT=10
+
+for f in /app/soul_files/*.md; do
+  fname=$(basename "$f")
+  if is_stateful "$fname"; then
+    continue
+  fi
+  dest="${DATA_DIR}/${fname}"
+  tmp="${dest}.fetching"
+  if curl -sf --max-time "${FETCH_TIMEOUT}" "${RAW_BASE}/${fname}" -o "${tmp}" 2>/dev/null; then
+    mv "${tmp}" "${dest}"
+    echo "[entrypoint] fetched ${fname} from GitHub"
+  else
+    rm -f "${tmp}"
+    echo "[entrypoint] WARNING: could not fetch ${fname} from GitHub — using baked-in copy"
+  fi
+done
+
 # Ensure inbox.md exists so heartbeat loader doesn't skip it silently.
 if [ ! -f "${DATA_DIR}/memory/inbox.md" ]; then
   mkdir -p "${DATA_DIR}/memory"

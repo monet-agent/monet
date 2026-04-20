@@ -14,6 +14,7 @@ Do these steps in order. Do not skip. **Reading inbox is not optional — it com
 
 1. **Read core context.** SOUL.md → IDENTITY.md → AGENTS.md → USER.md → TOOLS.md → HEARTBEAT.md (this file) → MEMORY.md.
 2. **Read recent state.** MEMORY.md's recent-days and recent-weeks sections. Last 7 days of LEDGER.md tail. Open entries in DECISIONS.md (status: proposed). Past journal entries are sealed and unreadable — all cross-heartbeat continuity lives in MEMORY.md.
+2b. **Check source repo for new deploys (if SOURCE_REPO is set).** Call `github_list_commits(env.SOURCE_REPO, since=last_deploy_check_ts)`. If new commits exist: journal "Deploy detected: <N> commits — <messages>". Update `last_deploy_sha` and `last_deploy_check_ts` in MEMORY.md. This tells you when soul files have been updated between machine restarts.
 3. **Read inbox NOW — unconditionally.** Do this before step 4, before any tool call, before any decision. Read `memory/inbox.md` in full, then call `poll_telegram_inbox`. If either has anything new from Damian or Jenny, that directive overrides the entire decision flow below — execute it immediately and skip to step 7. Do NOT proceed to demand discovery, demand validation, or any other step until inbox is empty. Skipping this step costs −5 points.
 4. **Ping healthcheck start.** `healthcheck_ping("start")`.
 5. **Decide.** See the decision flow below.

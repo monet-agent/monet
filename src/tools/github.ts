@@ -281,6 +281,29 @@ export async function githubTrending(
   return { topic, items: r.items };
 }
 
+export async function githubListCommits(
+  ownerRepo: string,
+  since?: string,
+  limit: number = 10,
+): Promise<{ repo: string; commits: Array<{ sha: string; message: string; author: string; date: string }> }> {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(ownerRepo)) {
+    throw new Error('ownerRepo must be "owner/repo"');
+  }
+  const capped = Math.max(1, Math.min(25, Math.floor(limit)));
+  let url = `${GITHUB_API}/repos/${ownerRepo}/commits?per_page=${capped}`;
+  if (since) url += `&since=${encodeURIComponent(since)}`;
+  const j = (await fetchJson(url)) as Array<Record<string, unknown>>;
+  return {
+    repo: ownerRepo,
+    commits: (Array.isArray(j) ? j : []).map((c) => ({
+      sha: String((c['sha'] as string | undefined)?.slice(0, 12) ?? ''),
+      message: String(((c['commit'] as Record<string, unknown>)?.['message'] as string | undefined)?.split('\n')[0] ?? ''),
+      author: String(((c['commit'] as Record<string, unknown>)?.['author'] as Record<string, unknown>)?.['name'] ?? ''),
+      date: String(((c['commit'] as Record<string, unknown>)?.['author'] as Record<string, unknown>)?.['date'] ?? ''),
+    })),
+  };
+}
+
 export const githubTools = [
   {
     type: 'function' as const,
@@ -409,6 +432,23 @@ export const githubTools = [
           limit: { type: 'number', description: 'Max results (1-25). Default 10.' },
         },
         required: ['topic'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'github_list_commits',
+      description:
+        'List recent commits on a repo. Use to detect whether monet\'s source repo has new deploys or a watched skill repo has been updated. Pass `since` (ISO date) to get only new commits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: '"owner/repo".' },
+          since: { type: 'string', description: 'ISO 8601 date — only return commits after this. Optional.' },
+          limit: { type: 'number', description: 'Max results (1-25). Default 10.' },
+        },
+        required: ['repo'],
       },
     },
   },
