@@ -35,7 +35,7 @@ Do these steps in order. Do not skip. **Reading inbox is not optional — it com
 
 ## Decision flow
 
-Walk this list in order and do the first thing that fires.
+Walk this list in order and do the first thing that fires. The system prompt injects state flags (`PENDING_PROPOSALS`, `PROPOSAL_ESCALATION_REQUIRED`, `STALE_PROPOSAL_FOLLOWUP_NEEDED`, `ACTIVE_VALIDATED_MVPS`, `STALE_MVP_WARNING`) that short-circuit this list — if any of steps 5/6/7 is flagged true in the prompt, take that action and stop.
 
 ### 1. Security first
 
@@ -58,29 +58,45 @@ Scan COMMITMENTS.md "Open" section. For every entry where `due` ≤ today:
 
 New promises made this heartbeat (via `imsg_send`, `moltbook_post`, `public_log_append`) MUST be appended to the "Open" section the same heartbeat. The group chat is not the commitment record.
 
-### 5. Demand discovery (the default)
+### 5. Active validated MVP work
 
-If nothing above fired, and `verified_events_7d` in the system prompt is **zero**, do a demand-discovery action. Not a build action.
+If the system prompt shows `ACTIVE_VALIDATED_MVPS ≥ 1`, do one concrete MVP step for the oldest validated proposal. Not the whole project — one step. `sandbox_exec` to test, `workspace_write` to scaffold, `github_push_file` to commit, whatever moves toward a shippable artifact the validator can transact against. When you log the delivery earn (`endpoint_live`, `tool_deployed`, `revenue_received`, `invoice_paid`, `paid_customer_acquired`, `skill_published_clawhub`), its `notes` field MUST cite `MVP_OF: <PROPOSAL_MSG_ID>` so derived-state can match delivery to validation.
+
+This step takes priority over demand discovery **even when `verified_events_7d` is 0** — a validated proposal is already a counterparty-verified demand signal, and shipping it is the fastest path to a `revenue_received` entry.
+
+If `STALE_MVP_WARNING` names an ID, that MVP must either ship this heartbeat or be explicitly killed via a `journal_append` entry that names the `PROPOSAL_MSG_ID` and the reason, followed by `memory_update` moving the proposal out of "Active proposals" in MEMORY.md. Don't let a validated proposal rot silently — a killed MVP is honest; a stale one is theater.
+
+### 6. Proposal escalation
+
+If the system prompt shows `PROPOSAL_ESCALATION_REQUIRED: true`, the action this heartbeat MUST be drafting and sending a structured proposal to `damian_jenny` built from one of the pain quotes you have already captured — not another pain-quote capture. Capturing another `customer_interview_logged` earn will not satisfy the progress requirement for this heartbeat.
+
+The proposal must pass all anti-bullshit rules (customer sentence lead, PROBLEM/USER/MVP/REVENUE/PAIN_QUOTE labels, no tier-jargon, revenue specificity). After sending the imsg, log a `note`-type ledger entry with `category="proposal_sent"` and `notes` containing `PROPOSAL_MSG_ID: <id>` so a later heartbeat can claim `idea_validated`.
+
+### 7. Stale proposal follow-up
+
+If the system prompt names an ID in `STALE_PROPOSAL_FOLLOWUP_NEEDED`, send ONE terse one-line `imsg_send` to damian asking for thoughts on that proposal. Do NOT re-send the proposal body. Do NOT send a new proposal in the same heartbeat. This is a nudge — exactly one sentence, no preamble.
+
+This counts as the progress action for the heartbeat.
+
+### 8. Demand discovery (default when 5/6/7 don't fire)
+
+If none of steps 5/6/7 fired, and `verified_events_7d` in the system prompt is **zero**, do a demand-discovery action. Not a build action.
 
 Concrete options (rotate sources — do not use the same one two heartbeats in a row; track last source in MEMORY.md):
-- Pull the most recent unread thread from `memory/inbox.md` or `damian_jenny` via `poll_telegram_inbox` and extract any pain quote, workflow complaint, or "I wish X existed" line. Log it via `ledger_append` with `customer_interview_logged` or `pricing_commit` if they named a dollar figure.
+- Pull the most recent unread thread from `memory/inbox.md` or `damian_jenny` via `poll_telegram_inbox` and extract any pain quote, workflow complaint, or "I wish X existed" line. Log it via `ledger_append` with `customer_interview_logged` (requires structured `notes`: `COUNTERPARTY: <name>` + `QUOTE: "<≥20 char direct quote>"`). If they named a dollar figure, log `pricing_commit` with `PRICE: $…` in notes.
 - Call `moltbook_list_submolts` to see all active submolts sorted by post volume, pick one you haven't read recently (check MEMORY.md for last submolt used), then `moltbook_read` it. The tool skips already-seen posts automatically — if `new_count: 0`, pick a different submolt next heartbeat. Extract any pain statements and log qualifying ones.
 - Send a pointed question to `damian_jenny` asking about one specific pain you're unsure is real. Format: one sentence, ends with a question mark.
 - Reply to a prior `public_log` entry that asked readers something and process the response.
 
-### 6. Active work on a validated proposal
-
-Is there a `proposal_sent` note with an `idea_validated` earn that hasn't shipped an MVP? Do one concrete MVP step in the 30-minute window. Not the whole project — one step. `sandbox_exec` to test, `workspace_write` to scaffold, whatever moves toward a shippable artifact the validator can transact against.
-
-### 7. Opportunity scan (secondary, only after 5/6 don't fire)
+### 9. Opportunity scan (secondary, only when 5–8 don't fire)
 
 Only hit this branch if demand discovery has produced 3+ validated proposals in the last 7 days AND all are either in-flight or converted. Then — and only then — broaden inputs:
 - `github_trending` / `github_search_repos` to see what's shipping. Look for operators whose repos imply pain you could solve.
 - A reflective journal entry on where the pipeline is overweight and what source to try next.
 
-Do not return `HEARTBEAT_OK` for an opportunity-scan heartbeat without doing one concrete action from steps 5 or 6. "Nothing to do" is not acceptable when `verified_events_7d` is below target.
+Do not return `HEARTBEAT_OK` for an opportunity-scan heartbeat without doing one concrete action from steps 5–8. "Nothing to do" is not acceptable when `verified_events_7d` is below target.
 
-### 7. Nothing to do
+### 10. Nothing to do
 
 Return `HEARTBEAT_OK`. Still journal it. Something like:
 ```

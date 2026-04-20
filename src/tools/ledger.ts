@@ -260,6 +260,122 @@ export function validateLedgerChain(): boolean {
   return validateChain(entries as unknown as Array<Record<string, unknown>>);
 }
 
+// ── Derived-state views over the ledger ────────────────────────────────────
+// These are pure functions over readAllEntries(). They exist so the heartbeat
+// loop can inject canonical state into the system prompt each wake, instead
+// of forcing monet to reconstruct it from MEMORY.md prose. All accept an
+// optional nowMs for deterministic tests.
+
+const PROPOSAL_ID_RE = /PROPOSAL_MSG_ID:\s*(\S+)/;
+
+export interface PendingProposal {
+  id: string;
+  sent_ts: string;
+  age_hours: number;
+}
+
+// A proposal_sent note entry with no downstream idea_validated earn whose
+// notes reference the same PROPOSAL_MSG_ID.
+export function getPendingProposals(nowMs: number = Date.now()): PendingProposal[] {
+  const entries = readAllEntries();
+  const validatedIds = new Set<string>();
+  for (const e of entries) {
+    if (e.type !== 'earn' || e.category !== 'idea_validated') continue;
+    const m = (e.notes ?? '').match(PROPOSAL_ID_RE);
+    if (m?.[1]) validatedIds.add(m[1]);
+  }
+  const pending: PendingProposal[] = [];
+  for (const e of entries) {
+    if (e.type !== 'note' || e.category !== 'proposal_sent') continue;
+    const m = (e.notes ?? '').match(PROPOSAL_ID_RE);
+    const id = m?.[1];
+    if (!id || validatedIds.has(id)) continue;
+    const sentMs = new Date(e.ts).getTime();
+    pending.push({
+      id,
+      sent_ts: e.ts,
+      age_hours: Math.max(0, (nowMs - sentMs) / (60 * 60 * 1000)),
+    });
+  }
+  pending.sort((a, b) => a.sent_ts.localeCompare(b.sent_ts));
+  return pending;
+}
+
+export interface DemandDiscoveryState {
+  interviews_this_week: number;
+  proposals_this_week: number;
+  escalation_required: boolean;
+}
+
+// Counts this-week customer_interview_logged earns and proposal_sent notes.
+// Escalation fires when ≥3 interviews have been logged and zero proposals
+// have gone out this week — the agent is sitting in discovery mode.
+export function getDemandDiscoveryState(nowMs: number = Date.now()): DemandDiscoveryState {
+  const entries = readAllEntries();
+  const weekStartMs = new Date(startOfWeekISO()).getTime();
+  void nowMs;
+  let interviews = 0;
+  let proposals = 0;
+  for (const e of entries) {
+    const ts = new Date(e.ts).getTime();
+    if (ts < weekStartMs) continue;
+    if (e.type === 'earn' && e.category === 'customer_interview_logged' && e.points_delta > 0) {
+      interviews += 1;
+    } else if (e.type === 'note' && e.category === 'proposal_sent') {
+      proposals += 1;
+    }
+  }
+  return {
+    interviews_this_week: interviews,
+    proposals_this_week: proposals,
+    escalation_required: interviews >= 3 && proposals === 0,
+  };
+}
+
+export interface ActiveValidatedProposal {
+  id: string;
+  validated_ts: string;
+  age_hours: number;
+  is_stale: boolean; // true if age_hours > 72
+}
+
+const MVP_OF_RE = /MVP_OF:\s*(\S+)/;
+const DELIVERY_CATEGORIES: ReadonlySet<string> = new Set([
+  'endpoint_live', 'revenue_received', 'invoice_paid', 'paid_customer_acquired',
+]);
+
+// idea_validated earns (last 21 days) whose PROPOSAL_MSG_ID has no matching
+// delivery earn. Delivery is matched by an MVP_OF: <id> marker in the
+// delivery earn's notes. Aged >72h with no delivery → is_stale=true.
+export function getActiveValidatedProposals(nowMs: number = Date.now()): ActiveValidatedProposal[] {
+  const entries = readAllEntries();
+  const cutoffMs = nowMs - 21 * 24 * 60 * 60 * 1000;
+  const deliveredIds = new Set<string>();
+  for (const e of entries) {
+    if (e.type !== 'earn' || !DELIVERY_CATEGORIES.has(e.category)) continue;
+    const m = (e.notes ?? '').match(MVP_OF_RE);
+    if (m?.[1]) deliveredIds.add(m[1]);
+  }
+  const active: ActiveValidatedProposal[] = [];
+  for (const e of entries) {
+    if (e.type !== 'earn' || e.category !== 'idea_validated') continue;
+    const ts = new Date(e.ts).getTime();
+    if (ts < cutoffMs) continue;
+    const m = (e.notes ?? '').match(PROPOSAL_ID_RE);
+    const id = m?.[1];
+    if (!id || deliveredIds.has(id)) continue;
+    const ageHours = Math.max(0, (nowMs - ts) / (60 * 60 * 1000));
+    active.push({
+      id,
+      validated_ts: e.ts,
+      age_hours: ageHours,
+      is_stale: ageHours > 72,
+    });
+  }
+  active.sort((a, b) => a.validated_ts.localeCompare(b.validated_ts));
+  return active;
+}
+
 export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'entry_hash'>): LedgerEntry {
   if (isLedgerReadOnly()) {
     throw new Error('Ledger is in read-only mode — verifier bucket unreachable. Resolve before appending.');
@@ -299,6 +415,61 @@ export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'ent
         `Earn "${event.category}" requires verification.ref to point at the external artifact ` +
         `(tx hash, settlement ID, signed LOI hash, ClawHub listing URL, etc.). Empty ref rejected.`,
       );
+    }
+
+    // Tightened counterparty_sig evidence gates. A ref URL alone is not proof
+    // — the notes field must name the counterparty and quote their words so
+    // the earn is auditable against a generic-pain false positive. Applies to
+    // customer_interview_logged, pricing_commit, loi_received. idea_validated
+    // has its own (stricter) gate below.
+    const COUNTERPARTY_SIG_GATED: ReadonlySet<string> = new Set([
+      'customer_interview_logged', 'pricing_commit', 'loi_received',
+    ]);
+    if (
+      event.verification.type === 'counterparty_sig' &&
+      COUNTERPARTY_SIG_GATED.has(event.category)
+    ) {
+      const notes = event.notes ?? '';
+      const counterpartyMatch = notes.match(/COUNTERPARTY:\s*([^\n\r]+)/i);
+      const rawCounterparty = counterpartyMatch?.[1]?.trim() ?? '';
+      const counterpartyPlaceholders = new Set(['tbd', 'unknown', '?', 'n/a', 'na', 'none']);
+      if (
+        rawCounterparty.length < 2 ||
+        counterpartyPlaceholders.has(rawCounterparty.toLowerCase())
+      ) {
+        throw new Error(
+          `Earn "${event.category}" requires notes to include "COUNTERPARTY: <name>" with a real ` +
+          `counterparty identifier (≥2 chars, not a placeholder). Got: "${rawCounterparty}". ` +
+          `A URL ref alone is not evidence — a named counterparty is.`,
+        );
+      }
+      const quoteMatch = notes.match(/QUOTE:\s*"([^"]{1,400})"/);
+      const quotedText = quoteMatch?.[1]?.trim() ?? '';
+      if (quotedText.length < 20) {
+        throw new Error(
+          `Earn "${event.category}" requires notes to include a direct-quoted counterparty ` +
+          `statement: QUOTE: "<their exact words, ≥20 chars>". Got quote of length ${quotedText.length}. ` +
+          `Single-word quotes like "interested" are not pain evidence.`,
+        );
+      }
+      if (event.category === 'pricing_commit') {
+        if (!/PRICE:\s*\$\s*[0-9]/.test(notes)) {
+          throw new Error(
+            `Earn "pricing_commit" requires notes to include "PRICE: $<amount>" naming the dollar ` +
+            `figure the counterparty committed to. Without a stated price, this is a pain quote, ` +
+            `not a pricing commit — log it as customer_interview_logged instead.`,
+          );
+        }
+      }
+      if (event.category === 'loi_received') {
+        if (!/LOI_(HASH|URL):\s*\S+/i.test(notes)) {
+          throw new Error(
+            `Earn "loi_received" requires notes to include either "LOI_HASH: <sha256>" or ` +
+            `"LOI_URL: <url>" referencing the signed LOI artifact. Without a hash/URL, this is ` +
+            `a pain quote, not an LOI.`,
+          );
+        }
+      }
     }
 
     // Anti-gaming guardrails for idea_validated.

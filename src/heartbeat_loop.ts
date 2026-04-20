@@ -3,7 +3,15 @@ import path from 'path';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions.js';
 
 import { callLLM, heartbeatMetrics, resetHeartbeatMetrics, estimateHeartbeatCostUSD } from './agent.js';
-import { validateLedgerChain, ledgerAppend, ledgerTools, getVerifiedEvents7d } from './tools/ledger.js';
+import {
+  validateLedgerChain,
+  ledgerAppend,
+  ledgerTools,
+  getVerifiedEvents7d,
+  getPendingProposals,
+  getDemandDiscoveryState,
+  getActiveValidatedProposals,
+} from './tools/ledger.js';
 import { journalAppend, journalReadCurrentSession, sealJournalBuffer, journalTools } from './tools/journal.js';
 import { publicLogAppend, publicLogTools } from './tools/public_log.js';
 import { healthcheckPing, healthcheckTools } from './tools/healthcheck.js';
@@ -48,6 +56,18 @@ const SOUL_FILES = [
   'RELATIONSHIPS.md', 'COMMITMENTS.md',
 ];
 
+// Soul files that should be stubbed out when effectively empty (header-only
+// + placeholder markers). The rest are always loaded in full. Keeps Tier 0
+// context lean.
+const CONDITIONAL_SOUL_FILES = new Set<string>([
+  'ROSTER.md',
+  'RELATIONSHIPS.md',
+  'COMMITMENTS.md',
+]);
+
+const STALE_PROPOSAL_AGE_HOURS = 1.5; // 3 heartbeats @ 30 min
+const STALE_PROPOSAL_LOG = 'memory/.stale_proposal_log.json';
+
 const MAX_HEARTBEAT_MINUTES = 20;
 const MAX_TOOL_CALLS_PER_HEARTBEAT = 30;
 
@@ -73,13 +93,37 @@ const ALL_TOOLS: ChatCompletionTool[] = [
   ...memoryTools,
 ];
 
-function loadSoulContext(): string {
+// Returns true when the file is just section headers + placeholder markers
+// and not worth loading in full at the current agent state. Kept
+// conservative: any non-trivial content body (>= 400 chars after stripping
+// headers + common empty-state markers) counts as substantive.
+function isSoulFileSubstantive(body: string): boolean {
+  const stripped = body
+    // drop markdown headings
+    .replace(/^\s*#{1,6}[^\n]*$/gm, '')
+    // drop common empty-state markers
+    .replace(/^\s*\*?\(empty[^\n]*\)?\s*$/gim, '')
+    .replace(/^\s*_?\(none yet[^\n]*\)?\s*$/gim, '')
+    .replace(/^\s*\*?\(none yet[^\n]*\)?\s*$/gim, '')
+    // drop italicised placeholder prose lines
+    .replace(/^\s*\*[^*\n]{0,200}\*\s*$/gm, '');
+  const nonWs = stripped.replace(/\s+/g, '');
+  return nonWs.length >= 400;
+}
+
+function loadSoulContext(): { text: string; skipped: string[] } {
   const parts: string[] = [];
+  const skipped: string[] = [];
   for (const filename of SOUL_FILES) {
     const filepath = path.join(DATA_DIR, filename);
-    if (fs.existsSync(filepath)) {
-      parts.push(`\n\n# FILE: ${filename}\n\n${fs.readFileSync(filepath, 'utf8')}`);
+    if (!fs.existsSync(filepath)) continue;
+    const body = fs.readFileSync(filepath, 'utf8');
+    if (CONDITIONAL_SOUL_FILES.has(filename) && !isSoulFileSubstantive(body)) {
+      parts.push(`\n\n# FILE: ${filename}\n\n(empty at this state — skipped to save tokens)`);
+      skipped.push(filename);
+      continue;
     }
+    parts.push(`\n\n# FILE: ${filename}\n\n${body}`);
   }
   // Also load recent LEDGER tail (last 7 days) and DECISIONS open proposals
   const ledgerPath = path.join(DATA_DIR, 'ledger.jsonl');
@@ -104,7 +148,34 @@ function loadSoulContext(): string {
     const tail = tel.slice(-4000);
     parts.push(`\n\n# RECENT HEARTBEAT TELEMETRY (tail)\n\n${tail}`);
   }
-  return parts.join('');
+  return { text: parts.join(''), skipped };
+}
+
+// Stale-proposal log: tracks how many consecutive heartbeats a pending
+// proposal has exceeded STALE_PROPOSAL_AGE_HOURS. Used to decide when to
+// prompt a one-line follow-up nudge.
+interface StaleProposalLog {
+  [id: string]: { first_flagged_ts: string; heartbeats_flagged: number };
+}
+
+function readStaleProposalLog(): StaleProposalLog {
+  const p = path.join(DATA_DIR, STALE_PROPOSAL_LOG);
+  if (!fs.existsSync(p)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8')) as StaleProposalLog;
+  } catch {
+    return {};
+  }
+}
+
+function writeStaleProposalLog(log: StaleProposalLog): void {
+  const p = path.join(DATA_DIR, STALE_PROPOSAL_LOG);
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(log, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[heartbeat] stale-proposal log write failed:', e);
+  }
 }
 
 // Tool dispatcher — maps function names to implementations
@@ -230,7 +301,11 @@ async function dispatchTool(name: string, args: Record<string, unknown>): Promis
   }
 }
 
-function writeHeartbeatTelemetry(startTs: number): void {
+function writeHeartbeatTelemetry(
+  startTs: number,
+  soulContextChars: number,
+  soulSkipped: string[],
+): void {
   const telemetryPath = path.join(DATA_DIR, 'memory/heartbeat_telemetry.md');
   const dur = ((Date.now() - startTs) / 1000).toFixed(1);
   const cost = estimateHeartbeatCostUSD();
@@ -243,7 +318,9 @@ function writeHeartbeatTelemetry(startTs: number): void {
     `- total_tokens: ${heartbeatMetrics.total_tokens}\n` +
     `- estimated_cost_usd: ${cost.toFixed(5)}\n` +
     `- primary_failures: ${heartbeatMetrics.primary_failures}\n` +
-    `- fallback_used: ${heartbeatMetrics.fallback_used}\n\n`;
+    `- fallback_used: ${heartbeatMetrics.fallback_used}\n` +
+    `- soul_context_chars: ${soulContextChars}\n` +
+    `- soul_skipped: ${soulSkipped.join(',') || 'none'}\n\n`;
   try {
     fs.appendFileSync(telemetryPath, line, 'utf8');
   } catch (e) {
@@ -286,13 +363,77 @@ export async function runHeartbeat(): Promise<void> {
   }
 
   // ── 2. Load soul context ──────────────────────────────────────────────────
-  const soulContext = loadSoulContext();
+  const { text: soulContext, skipped: soulSkipped } = loadSoulContext();
+  if (soulSkipped.length > 0) {
+    console.log(`[heartbeat] soul files skipped (empty): ${soulSkipped.join(', ')}`);
+  }
   const verifiedEvents7d = getVerifiedEvents7d();
+
+  // Derive demand-discovery / proposal state from the ledger.
+  const pendingProposals = getPendingProposals();
+  const demandState = getDemandDiscoveryState();
+  const activeValidated = getActiveValidatedProposals();
+
+  const stalePending = pendingProposals.filter((p) => p.age_hours >= STALE_PROPOSAL_AGE_HOURS);
+  const staleLog = readStaleProposalLog();
+  const nowIso = new Date().toISOString();
+  // Prune log entries that are no longer pending or no longer stale.
+  const stillStaleIds = new Set(stalePending.map((p) => p.id));
+  for (const id of Object.keys(staleLog)) {
+    if (!stillStaleIds.has(id)) delete staleLog[id];
+  }
+  for (const p of stalePending) {
+    const prev = staleLog[p.id];
+    if (!prev) {
+      staleLog[p.id] = { first_flagged_ts: nowIso, heartbeats_flagged: 1 };
+    } else {
+      prev.heartbeats_flagged += 1;
+    }
+  }
+  writeStaleProposalLog(staleLog);
+  // Nudge a one-line follow-up once a pending proposal has been stale for
+  // >=3 heartbeats. Names the single oldest flagged ID.
+  const followupId = stalePending
+    .filter((p) => (staleLog[p.id]?.heartbeats_flagged ?? 0) >= 3)
+    .sort((a, b) => b.age_hours - a.age_hours)[0]?.id;
+
+  const staleMvps = activeValidated.filter((m) => m.is_stale).map((m) => m.id);
+
+  const pendingLine =
+    pendingProposals.length === 0
+      ? 'PENDING_PROPOSALS: 0'
+      : `PENDING_PROPOSALS: ${pendingProposals.length} [${pendingProposals
+          .map((p) => `${p.id}@${p.age_hours.toFixed(1)}h`)
+          .join(', ')}]`;
+  const activeMvpLine =
+    activeValidated.length === 0
+      ? 'ACTIVE_VALIDATED_MVPS: 0'
+      : `ACTIVE_VALIDATED_MVPS: ${activeValidated.length} [${activeValidated
+          .map((m) => `${m.id}@${m.age_hours.toFixed(1)}h`)
+          .join(', ')}]`;
+
+  const escalationDirective = demandState.escalation_required
+    ? `\n→ PROPOSAL ESCALATION: You have ${demandState.interviews_this_week} logged customer interview(s) this week and ${demandState.proposals_this_week} proposal_sent note(s) this week. The next action MUST be drafting and sending a structured proposal to damian_jenny (PROBLEM/USER/MVP/REVENUE built from a captured pain quote), not another pain-quote capture. Another customer_interview_logged earn will not satisfy the progress requirement this heartbeat.`
+    : '';
+  const staleProposalDirective = followupId
+    ? `\n→ STALE PROPOSAL FOLLOWUP: proposal ${followupId} has been pending with no validator reply across ≥3 heartbeats. Send ONE terse one-line imsg_send to damian asking for thoughts on ${followupId}. Do NOT re-send the proposal body. This counts as your progress action for the heartbeat.`
+    : '';
+  const staleMvpDirective = staleMvps.length > 0
+    ? `\n→ STALE MVP WARNING: validated proposal(s) ${staleMvps.join(', ')} are >72h old with no endpoint_live/revenue_received/invoice_paid/paid_customer_acquired earn citing MVP_OF:<id>. Ship the MVP this heartbeat or journal an explicit kill decision explaining why.`
+    : '';
+  const activeMvpDirective = activeValidated.length > 0
+    ? `\n→ ACTIVE VALIDATED MVPS: ${activeValidated.length} validated proposal(s) have no matching delivery earn. A validated proposal is a counterparty-verified demand signal — shipping it is the fastest path to a revenue_received entry. One concrete MVP step on the oldest active proposal takes priority over demand discovery this heartbeat, even if VERIFIED_EVENTS_7D is 0.`
+    : '';
 
   const systemPrompt = `VERIFIED_EVENTS_7D: ${verifiedEvents7d}
 ${verifiedEvents7d === 0
     ? '→ This week has produced ZERO externally-verified events. Reading, drafting, and summarizing are NOT progress. Pick a demand-discovery action this heartbeat (customer interview, pain-quote capture, structured proposal to damian_jenny), not a build action. A build with no named buyer is gaming the loop.'
     : `→ ${verifiedEvents7d} externally-verified event(s) logged in the last 7 days. Keep the cadence on demand signals; do not let it drop to zero.`}
+${pendingLine}
+PROPOSAL_ESCALATION_REQUIRED: ${demandState.escalation_required} (interviews_this_week=${demandState.interviews_this_week}, proposals_this_week=${demandState.proposals_this_week})
+STALE_PROPOSAL_FOLLOWUP_NEEDED: ${followupId ?? 'none'}
+${activeMvpLine}
+STALE_MVP_WARNING: ${staleMvps.length > 0 ? staleMvps.join(', ') : 'none'}${activeMvpDirective}${escalationDirective}${staleProposalDirective}${staleMvpDirective}
 
 ${soulContext}
 
@@ -531,7 +672,7 @@ Important constraints:
 
   // ── 5. End-of-heartbeat seal ──────────────────────────────────────────────
   await sealJournalBuffer();
-  writeHeartbeatTelemetry(startTs);
+  writeHeartbeatTelemetry(startTs, soulContext.length, soulSkipped);
 
   // Ensure healthcheck "ok" fired (agent should have called it, but be safe)
   // We don't double-ping if already called — healthcheckPing is idempotent
