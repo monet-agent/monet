@@ -721,3 +721,48 @@ describe('getVerifiedEvents7d', () => {
     expect(getVerifiedEvents7d()).toBe(0);
   });
 });
+
+// ── 10. ts-less entries don't crash derived-state ──────────────────────────
+
+describe('legacy entries without ts', () => {
+  test('ledgerAppend stamps ts when the caller omits it', () => {
+    const entry = ledgerAppend({
+      type: 'note',
+      category: 'proposal_sent',
+      amount_cad: 0,
+      points_delta: 0,
+      description: 'no ts',
+      verification: { type: 'self' },
+      notes: 'PROPOSAL_MSG_ID: stamped-1',
+    } as Parameters<typeof ledgerAppend>[0]);
+    expect(typeof entry.ts).toBe('string');
+    expect(new Date(entry.ts).getTime()).toBeGreaterThan(0);
+  });
+
+  test('derived-state fns skip pre-existing rows that lack ts', () => {
+    // Write a raw ts-less proposal_sent row directly to simulate the legacy
+    // entries already on the Fly volume. We don't bother preserving chain
+    // integrity here — derived-state reads the JSONL directly.
+    const ledgerPath = path.join(tmpDir, 'ledger.jsonl');
+    const legacy = {
+      type: 'note',
+      category: 'proposal_sent',
+      amount_cad: 0,
+      points_delta: 0,
+      description: 'legacy',
+      verification: { type: 'self' },
+      notes: 'PROPOSAL_MSG_ID: legacy-1',
+      seq: 1,
+      prev_hash: 'sha256:0',
+      entry_hash: 'sha256:x',
+    };
+    fs.writeFileSync(ledgerPath, JSON.stringify(legacy) + '\n', 'utf8');
+    // These must not throw.
+    expect(() => getPendingProposals()).not.toThrow();
+    expect(() => getDemandDiscoveryState()).not.toThrow();
+    expect(() => getActiveValidatedProposals()).not.toThrow();
+    expect(() => getVerifiedEvents7d()).not.toThrow();
+    // The ts-less row is excluded from pending (no way to compute age).
+    expect(getPendingProposals()).toEqual([]);
+  });
+});

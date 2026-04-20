@@ -251,7 +251,9 @@ export function getVerifiedEvents7d(): number {
   return entries.filter((e) => {
     if (e.type !== 'earn') return false;
     if (e.verification.type === 'self' || e.verification.type === 'none') return false;
-    return new Date(e.ts).getTime() >= cutoff;
+    if (!e.ts) return false;
+    const ts = new Date(e.ts).getTime();
+    return Number.isFinite(ts) && ts >= cutoff;
   }).length;
 }
 
@@ -290,7 +292,10 @@ export function getPendingProposals(nowMs: number = Date.now()): PendingProposal
     const m = (e.notes ?? '').match(PROPOSAL_ID_RE);
     const id = m?.[1];
     if (!id || validatedIds.has(id)) continue;
+    // Legacy entries may lack `ts`. Skip them rather than crashing the sort.
+    if (!e.ts) continue;
     const sentMs = new Date(e.ts).getTime();
+    if (!Number.isFinite(sentMs)) continue;
     pending.push({
       id,
       sent_ts: e.ts,
@@ -317,8 +322,9 @@ export function getDemandDiscoveryState(nowMs: number = Date.now()): DemandDisco
   let interviews = 0;
   let proposals = 0;
   for (const e of entries) {
+    if (!e.ts) continue;
     const ts = new Date(e.ts).getTime();
-    if (ts < weekStartMs) continue;
+    if (!Number.isFinite(ts) || ts < weekStartMs) continue;
     if (e.type === 'earn' && e.category === 'customer_interview_logged' && e.points_delta > 0) {
       interviews += 1;
     } else if (e.type === 'note' && e.category === 'proposal_sent') {
@@ -359,8 +365,9 @@ export function getActiveValidatedProposals(nowMs: number = Date.now()): ActiveV
   const active: ActiveValidatedProposal[] = [];
   for (const e of entries) {
     if (e.type !== 'earn' || e.category !== 'idea_validated') continue;
+    if (!e.ts) continue;
     const ts = new Date(e.ts).getTime();
-    if (ts < cutoffMs) continue;
+    if (!Number.isFinite(ts) || ts < cutoffMs) continue;
     const m = (e.notes ?? '').match(PROPOSAL_ID_RE);
     const id = m?.[1];
     if (!id || deliveredIds.has(id)) continue;
@@ -569,7 +576,11 @@ export function ledgerAppend(event: Omit<LedgerEntry, 'seq' | 'prev_hash' | 'ent
   const seq = state.seq + 1;
   const prev_hash = state.last_hash;
 
-  const partial = { ...event, seq, prev_hash } as Record<string, unknown>;
+  // Stamp ts server-side if the caller (often the LLM) omitted it. Missing
+  // ts silently broke getVerifiedEvents7d and crashed derived-state sorts,
+  // so treat it as a harness guarantee rather than caller discipline.
+  const stampedEvent = event.ts ? event : { ...event, ts: new Date().toISOString() };
+  const partial = { ...stampedEvent, seq, prev_hash } as Record<string, unknown>;
   const entry_hash = computeEntryHash({ ...partial, entry_hash: '' });
   const entry: LedgerEntry = { ...(partial as Omit<LedgerEntry, 'entry_hash'>), entry_hash };
 
